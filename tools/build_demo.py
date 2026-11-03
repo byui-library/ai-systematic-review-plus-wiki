@@ -97,9 +97,16 @@ def main() -> None:
         keep, filtered = screen.pre_filter(records, project.exclude)
         cands, low = screen.prescreen(keep, project.keyword_groups, project.threshold)
 
+    def entry(rec) -> dict:
+        """The source review's decision, whether keyed by template id, bare DOI, or bare PMID."""
+        for key in (rec['id'], rec.get('doi'), rec.get('pmid')):
+            if key and key in reference:
+                return reference[key]
+        return {}
+
     def tier(rec):
-        entry = reference.get(rec['id'], {})
-        return entry.get('tier', entry.get('category'))
+        found = entry(rec)
+        return found.get('tier', found.get('category'))
 
     multi = [c for c in cands if len(c['sources']) > 1]
     chosen = []
@@ -107,6 +114,9 @@ def main() -> None:
         pool = [c for c in cands if tier(c) == t]
         pool.sort(key=lambda c: (len(c['sources']) == 1, c['id']))     # prefer cross-database records
         chosen += pool[:n]
+    if not any(tier(c) for c in chosen):
+        sys.exit('None of the candidates matched a decision in --decisions. Check that its keys are record ids, '
+                 'DOIs, or PMIDs from the same search.')
     chosen += rng.sample(sorted(filtered, key=lambda r: r['id']), FILTERED)
     chosen += rng.sample(sorted(low, key=lambda r: r['id']), LOW_SCORE)
     keep_keys = set().union(*(_keys(r) for r in chosen))
@@ -119,8 +129,8 @@ def main() -> None:
     def clean(reason: str) -> str:
         return re.sub(r'^\s*\[[^\]]*\]\s*', '', reason or '').strip() or 'Matches the tier definition.'
 
-    decisions = {'results': [{'id': c['id'], 'tier': tier(c), 'score': reference[c['id']].get('score') or 50,
-                              'reason': clean(reference[c['id']].get('reason', ''))}
+    decisions = {'results': [{'id': c['id'], 'tier': tier(c), 'score': entry(c).get('score') or 50,
+                              'reason': clean(entry(c).get('reason', ''))}
                              for c in chosen if c in cands and tier(c)]}
     (DEMO / 'decisions.json').write_text(json.dumps(decisions, indent=2, ensure_ascii=False), encoding='utf-8')
     human = {r['id']: r['tier'] for r in decisions['results']}
@@ -129,6 +139,24 @@ def main() -> None:
         human[pid] = 2 if human[pid] != 2 else 3
     (DEMO / 'human_tiers.json').write_text(json.dumps(human, indent=2), encoding='utf-8')
     print(f'wrote {len(decisions["results"])} decisions and {len(human)} human tiers')
+    _write_expected(decisions)
+
+
+def _write_expected(decisions: dict) -> None:
+    """Import the new subset exactly as a researcher would, and record the counts the demo test checks."""
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Paths(tmp)
+        shutil.copy(DEMO / 'project.yaml', work.project_yaml)
+        shutil.copytree(DEMO / 'exports', work.exports)
+        project = load_project(tmp)
+        stages.run_import(work, project)
+        stats = {**stages.run_prescreen(work, project), **json.loads(work.stats.read_text(encoding='utf-8'))}
+    included = set(project.included_tier_ids)
+    expected = {key: stats[key] for key in ('total_raw', 'unique', 'duplicates_removed', 'prefilter_excluded',
+                                            'prescreen_excluded', 'candidates')}
+    expected['included'] = sum(1 for r in decisions['results'] if r['tier'] in included)
+    (DEMO / 'expected.json').write_text(json.dumps(expected) + '\n', encoding='utf-8')
+    print(f'expected counts: {expected}')
 
 
 if __name__ == '__main__':

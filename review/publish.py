@@ -42,15 +42,31 @@ def _check_repo(paths: Paths, repo: Path) -> None:
     if missing:
         raise PipelineError(f'{repo} does not look like an openEQUELLA content repository (missing {", ".join(missing)}). '
                             'Create it from byui-oeq/openequella-content-template (see docs/08-website.md).')
+    if _git(repo, 'status', '--porcelain').strip():
+        raise PipelineError(f'{repo} has uncommitted changes. Publishing replaces every website file there and commits, '
+                            'so commit or discard your own changes in that repository first.')
 
 
-def _notes(repo: Path, files: int, max_files: int) -> list[str]:
+def _metadata(repo: Path) -> dict:
+    try:
+        meta = json.loads((repo / 'metadata.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError) as exc:
+        raise PipelineError(f'{repo / "metadata.json"} is not valid JSON ({exc}). Fix it before publishing.') from exc
+    if not isinstance(meta, dict):
+        raise PipelineError(f'{repo / "metadata.json"} must be a JSON object of "name": "value" fields.')
+    return meta
+
+
+def _notes(meta: dict, files: int, max_files: int) -> list[str]:
     notes = []
     if files > max_files:
         notes.append(f'The site has {files} files. openEQUELLA works best below about {max_files}; very large items '
                      'can time out when saved. Ask the openEQUELLA admins before pushing.')
-    meta = json.loads((repo / 'metadata.json').read_text(encoding='utf-8'))
-    if meta.get('restrictToByui') != 'true':
+    access = meta.get('restrictToByui')
+    if access is True:
+        notes.append('metadata.json has restrictToByui as a true/false value; openEQUELLA needs the text "true" '
+                     '(with quotes): "restrictToByui": "true".')
+    elif access != 'true':
         notes.append('metadata.json does not limit the item to BYU-I sign-in, but the site includes copyrighted PDFs. '
                      'Set "restrictToByui": "true" before pushing.')
     if any('REPLACE THIS' in str(meta.get(key, '')) for key in ('title', 'description')):
@@ -61,6 +77,7 @@ def _notes(repo: Path, files: int, max_files: int) -> list[str]:
 def sync_openequella(paths: Paths, project: Project, content_repo: Path | str, max_files: int = MAX_FILES) -> dict:
     repo = Path(content_repo).resolve()
     _check_repo(paths, repo)
+    meta = _metadata(repo)   # read before anything changes, so a broken file stops the run cleanly
     built, warnings = site.build_site(paths, project, 'openequella')
 
     for path in sorted(repo.rglob('*'), key=lambda p: len(p.parts), reverse=True):
@@ -85,5 +102,5 @@ def sync_openequella(paths: Paths, project: Project, content_repo: Path | str, m
     if committed:
         _git(repo, 'commit', '-q', '-m', f'Update the {project.title} website')
     state.mark_done(paths, 'publish', target='openequella')
-    return {'repo': repo, 'files': files, 'committed': committed, 'notes': _notes(repo, files, max_files),
+    return {'repo': repo, 'files': files, 'committed': committed, 'notes': _notes(meta, files, max_files),
             'warnings': warnings}

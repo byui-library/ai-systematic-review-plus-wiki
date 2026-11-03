@@ -22,12 +22,11 @@ def test_data_is_committed_but_secrets_and_scratch_are_not():
 
 def test_run_py_bootstraps_the_venv_before_third_party_imports():
     tree = ast.parse((ROOT / 'run.py').read_text(encoding='utf-8'))
-    bootstrap_at = next(i for i, node in enumerate(tree.body)
+    bootstrap_at = next(node.lineno for node in tree.body
                         if isinstance(node, ast.If) and '_use_project_venv' in ast.unparse(node))
-    first_review_import = next(i for i, node in enumerate(tree.body)
-                               if isinstance(node, (ast.Import, ast.ImportFrom))
-                               and (getattr(node, 'module', '') or '').startswith('review'))
-    assert bootstrap_at < first_review_import
+    review_imports = [node.lineno for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+                      and (node.module or '').startswith('review')]
+    assert review_imports and bootstrap_at < min(review_imports)
 
 
 def test_run_py_works_from_the_command_line(tmp_path):

@@ -79,6 +79,7 @@ def test_warns_about_size_public_access_and_placeholders(scaffolded, content_rep
     meta = json.loads((content_repo / 'metadata.json').read_text(encoding='utf-8'))
     meta.update(restrictToByui='Public', title='REPLACE THIS - your resource title')
     (content_repo / 'metadata.json').write_text(json.dumps(meta), encoding='utf-8')
+    _git(content_repo, 'commit', '-qam', 'Edit metadata')   # publishing refuses uncommitted changes
     notes = ' '.join(publish.sync_openequella(paths, project, content_repo, max_files=5)['notes'])
     assert 'files' in notes and 'restrictToByui' in notes and 'REPLACE THIS' in notes
 

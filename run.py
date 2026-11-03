@@ -18,19 +18,45 @@ def _use_project_venv() -> None:
         return
     venv = Path(__file__).resolve().parent / '.venv'
     python = venv / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
-    if python.exists() and Path(sys.prefix).resolve() != venv.resolve():
-        result = subprocess.run([str(python), str(Path(__file__).resolve()), *sys.argv[1:]],
-                                env={**os.environ, 'REVIEW_NO_VENV': '1'})
-        sys.exit(result.returncode)
+    if not python.exists() or Path(sys.prefix).resolve() == venv.resolve():
+        return
+    home = next((line.split('=', 1)[1].strip() for line in _read(venv / 'pyvenv.cfg').splitlines()
+                 if line.split('=', 1)[0].strip() == 'home'), '')
+    if home and not Path(home).exists():
+        sys.exit(f'The private Python environment in .venv points to a Python that is no longer installed ({home}).\n'
+                 'Delete the .venv folder and run the setup script again (setup/install-windows.bat or '
+                 'setup/install-mac.sh).')
+    child = subprocess.Popen([str(python), str(Path(__file__).resolve()), *sys.argv[1:]],
+                             env={**os.environ, 'REVIEW_NO_VENV': '1'})
+    try:
+        sys.exit(child.wait())
+    except KeyboardInterrupt:   # Ctrl+C reaches both processes; let the command stop on its own
+        try:
+            child.wait(timeout=10)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            child.kill()
+        sys.exit(130)
+
+
+def _read(path: Path) -> str:
+    try:
+        return path.read_text(encoding='utf-8')
+    except OSError:
+        return ''
 
 
 if __name__ == '__main__':
     _use_project_venv()
 
-from review import (classify, demo, figures, graph, pdfs, publish, report, site, stages, state,  # noqa: E402
-                    tables, validate, wiki)
-from review.config import Paths, load_project, summary  # noqa: E402
-from review.errors import PipelineError  # noqa: E402
+try:
+    from review import (classify, demo, figures, graph, pdfs, publish, report, site, stages, state,  # noqa: E402
+                        tables, validate, wiki)
+    from review.config import Paths, load_project, summary  # noqa: E402
+    from review.errors import PipelineError  # noqa: E402
+except ImportError as exc:
+    sys.exit(f'A package this template needs is missing ({exc}).\n'
+             'Run the setup script again: double-click setup/install-windows.bat on Windows, or run '
+             'bash setup/install-mac.sh on a Mac.')
 
 
 def _rel(paths: Paths, p: Path) -> str:
@@ -360,6 +386,9 @@ def main(argv: list[str] | None = None) -> int:
     except PipelineError as err:
         print(f'\nStopped: {err}', file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        print('\nStopped (Ctrl+C). Saved work is kept; run the command again to carry on.', file=sys.stderr)
+        return 130
     return 0
 
 

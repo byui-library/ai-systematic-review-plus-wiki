@@ -36,8 +36,8 @@ def test_hook_handles_tables_stems_missing_pages_and_comments(indexed):
 
 def test_publisher_link_replaces_pdf_links():
     text = '**Sources**: [Open PDF](../../raw/tier1/T1-01%20-%20x.pdf)'
-    assert hooks.publisher_link(text, DOE) == '**Sources**: [Publisher page](https://doi.org/10.1000/example.001)'
-    assert hooks.publisher_link(text, 'pmid:123') == '**Sources**: Full text not published on this site.'
+    assert hooks.publisher_link(text, {'id': DOE}) == '**Sources**: [Publisher page](https://doi.org/10.1000/example.001)'
+    assert hooks.publisher_link(text, {'id': 'pmid:123'}) == '**Sources**: Full text not published on this site.'
 
 
 # ── site build ───────────────────────────────────────────────────────────────
