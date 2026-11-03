@@ -150,7 +150,7 @@ Every importer produces the same common record:
 - Unknown formats produce a clear error that names the supported formats.
 
 ### Prescreen
-`pre_filter` removes records according to the `exclude` flags (MeSH and publication types are used when present). `score` adds up `weight × matched_terms` across the keyword groups, and records below the threshold are excluded.
+`pre_filter` removes records according to the `exclude` flags (MeSH and publication types are used when present). `score` adds each keyword group's weight once if any of its terms appears in the title, abstract, or keywords (the rule Flynn used). Records below the threshold are excluded.
 
 Outputs: `data/candidates.json`, `data/prescreen_excluded.json`, `data/stats.json`.
 
@@ -161,7 +161,7 @@ Outputs: `data/candidates.json`, `data/prescreen_excluded.json`, `data/stats.jso
   - every id must be a known candidate
   - the tier must be valid
   - reason must be non-empty
-  - score must be 0–100
+  - score must be 1–100
 - It then stamps `tool`, `model`, and `timestamp` and merges into `data/checkpoint.json`, which is both the source of truth and the audit log.
 - If a save is invalid, nothing is written and every problem is listed.
 
