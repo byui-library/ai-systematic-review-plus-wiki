@@ -3,7 +3,7 @@
 **Date:** 2026-11-03
 **Owner:** Mathew Miles (Librarian, BYU-Idaho)
 **Repository:** `byui-library/ai-systematic-review-plus-wiki` (public, GitHub template repo)
-**Origin:** Generalized from the Flynn Research systematic-review pipeline (sports science). Flynn Research itself is not modified.
+**Origin:** Generalized from the pipeline of an earlier sports-science systematic review (the reference implementation). The reference repo itself is not modified.
 
 ## 1. Goal
 
@@ -23,14 +23,14 @@ database exports → dedupe → keyword prescreen → AI tiering → human valid
 | Tiers | 4-tier default (Core / Strong / Peripheral / Exclude). Labels, definitions, and the included flag can be edited |
 | AI tool | Agent-neutral: Claude Code, Codex, or any agent that can run shell commands |
 | Packaging of AI steps | Shared markdown playbooks in `prompts/`. `AGENTS.md`, `CLAUDE.md`, and `.claude/commands/` are thin wrappers around them |
-| Wiki | The full Flynn structure, generalized |
+| Wiki | The full reference-review wiki structure, generalized |
 | Concept axes | Proposed in the setup interview, confirmed by the researcher, stored in `project.yaml` |
 | Extras | Frequency figures, knowledge graph, and quality appraisal on by default. PRISMA flowchart is opt-in |
 | PDFs | LibKey (if credentials are set), then Unpaywall, then a manual list plus a drop-folder matcher. Abstract is used if no PDF |
 | Hosting | Local build, GitHub Pages (PDFs excluded), openEQUELLA (PDFs included) |
 | Demo | ~30 anonymized records from the sports-science search |
 | Integrity | Audit log on every AI decision, blind validation sample, Cohen's kappa, draft AI-use disclosure |
-| Build approach | Fork and generalize the proven Flynn code into a new repo |
+| Build approach | Fork and generalize the proven reference-review code into a new repo |
 
 ## 2. Architecture
 
@@ -150,7 +150,7 @@ Every importer produces the same common record:
 - Unknown formats produce a clear error that names the supported formats.
 
 ### Prescreen
-`pre_filter` removes records according to the `exclude` flags (MeSH and publication types are used when present). `score` adds each keyword group's weight once if any of its terms appears in the title, abstract, or keywords (the rule Flynn used). Records below the threshold are excluded.
+`pre_filter` removes records according to the `exclude` flags (MeSH and publication types are used when present). `score` adds each keyword group's weight once if any of its terms appears in the title, abstract, or keywords (the rule the reference pipeline used). Records below the threshold are excluded.
 
 Outputs: `data/candidates.json`, `data/prescreen_excluded.json`, `data/stats.json`.
 
@@ -214,7 +214,7 @@ Other behavior:
 - `graph` produces `tables/knowledge-graph.html` (vis-network, standalone) from the `[[links]]`.
 
 ### Site and publish
-- `site` generates the mkdocs nav from the wiki folders and builds with Material; `site --serve` previews locally. The wikilinks hook is ported from Flynn.
+- `site` generates the mkdocs nav from the wiki folders and builds with Material; `site --serve` previews locally. The wikilinks hook is ported from the reference pipeline.
 - **GitHub Pages:** `pages.yml` builds with `EXCLUDE_PDFS=1`. A hook drops `raw/` and rewrites `[Open PDF]` links to doi.org links.
 - **openEQUELLA:** `openequella.yml` and `metadata.json`, following the BYU-I oe-github publish pattern, with PDFs included because access is campus-restricted.
 - **Local:** `site/`.
@@ -258,8 +258,8 @@ Other behavior:
 
 - Manuscript and .docx generation, SDC builders, NotebookLM, graphify
 - An Anthropic/OpenAI API-key classification mode
-- Flynn's legacy scripts
-- Any change to the Flynn Research repo
+- The reference pipeline's legacy scripts
+- Any change to the reference repo
 
 ## 10. Error handling principles
 

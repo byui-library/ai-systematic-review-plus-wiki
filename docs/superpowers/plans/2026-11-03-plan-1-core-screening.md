@@ -4,7 +4,7 @@
 
 **Goal:** Build a working, config-driven pipeline that covers import → dedupe → prescreen → AI classify → human validation → report, for any research question defined in `project.yaml`.
 
-**Architecture:** A `review/` Python package that `run.py` drives (argparse subcommands). Python handles all file I/O. An AI agent only reads `data/classify_batch.json` and writes `data/classify_results.json`, which `run.py classify --save` validates before saving. State lives in `data/*.json`, and every write is atomic. The code is ported from the Flynn Research `Search Results/pipeline/` package, with all sports-specific constants replaced by `project.yaml`.
+**Architecture:** A `review/` Python package that `run.py` drives (argparse subcommands). Python handles all file I/O. An AI agent only reads `data/classify_batch.json` and writes `data/classify_results.json`, which `run.py classify --save` validates before saving. State lives in `data/*.json`, and every write is atomic. The code is ported from the reference review's pipeline package, with all sports-specific constants replaced by `project.yaml`.
 
 **Tech Stack:** Python ≥ 3.11, PyYAML, openpyxl, matplotlib (PRISMA only), pytest.
 
@@ -68,7 +68,7 @@ Canned tiers used in tests:
 | 004 | 3 |
 | 006 | 4 |
 
-All commands below run from the repo root (`C:\Users\milesm\Documents\repos\ai-systematic-review-plus-wiki`) in Git Bash. `PY` means `.venv/Scripts/python`.
+All commands below run from the repo root in Git Bash. `PY` means `.venv/Scripts/python`.
 
 ---
 
@@ -1490,7 +1490,7 @@ git commit -m "Add cross-source deduplication with stable ids"
 
 ### Task 6: Pre-filter and keyword prescreen (`review/screen.py`)
 
-Scoring follows Flynn's proven rule: each keyword group adds its weight **once** if any of its terms appears. The terms are matched against the title, abstract and keywords.
+Scoring follows the reference pipeline's proven rule: each keyword group adds its weight **once** if any of its terms appears. The terms are matched against the title, abstract and keywords.
 
 **Files:**
 - Create: `review/screen.py`

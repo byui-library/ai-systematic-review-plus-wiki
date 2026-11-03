@@ -10,7 +10,7 @@ A public, cloneable template (`byui-library/ai-systematic-review-plus-wiki`) tha
 
 database exports → dedupe → keyword prescreen → AI tiering → human validation sample → Excel report → full-text PDFs → Obsidian wiki → MkDocs website
 
-It is generalized from the Flynn Research pipeline (`C:\Users\milesm\Documents\repos\Flynn Research`), which is the reference implementation. **Read from that repo; never modify it.**
+It is generalized from the pipeline of an earlier sports-science systematic review, which is the reference implementation. Maintainers record its local location in `CLAUDE.local.md` (git-ignored). **Read from that repo; never modify it.**
 
 ## Source of truth
 
@@ -59,4 +59,4 @@ Commands available so far: `status`, `check-config`, `import`, `prescreen`, `cla
 
 Tests must pass on Windows and Ubuntu (CI: `.github/workflows/tests.yml`). Tests use synthetic exports from `tests/fixture_exports.py`; never commit real search data outside `examples/demo/`.
 
-Smoke-tested on the real Flynn v3 exports: raw counts match Flynn exactly (691 PubMed / 32 WoS / 40 SPORTDiscus), and dedup finds 721 unique versus Flynn's 722. The extra match is a genuine duplicate caught by the title+year key.
+Smoke-tested on the reference review's real exports (PubMed, WoS, and SPORTDiscus; about 760 records): raw counts per source match the reference pipeline exactly, and dedup differs by one record, a genuine duplicate that the title+year key catches.
