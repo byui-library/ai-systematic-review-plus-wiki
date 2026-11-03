@@ -100,3 +100,23 @@ def test_missing_packages_give_a_setup_message(tmp_path):
 def test_interrupt_exits_quietly():
     source = (ROOT / 'run.py').read_text(encoding='utf-8')
     assert 'KeyboardInterrupt' in source and '130' in source
+
+
+# ── Copilot review on PR #5 ──────────────────────────────────────────────────
+
+def test_public_build_drops_pdfs_with_any_capitalisation_anywhere(classified):
+    pytest.importorskip('mkdocs')
+    from review import site
+    from tests.helpers import make_pdf
+    paths, project = classified
+    wiki.scaffold(paths, project)
+    for rel in ('attachments/paper.PDF', 'concepts/methods/notes.Pdf', 'raw/tier1/x.pdf'):
+        make_pdf(paths.wiki / rel, 'full text')
+    out, _ = site.build_site(paths, project, 'github_pages')
+    assert not [p for p in out.rglob('*') if p.suffix.lower() == '.pdf']
+
+
+def test_faq_never_advises_deleting_the_audit_trail():
+    faq = (ROOT / 'docs/faq.md').read_text(encoding='utf-8')
+    start_over = faq[faq.index('**How do I start over?**'):]
+    assert 'Delete `data/`' not in start_over and 'audit' in start_over.lower()

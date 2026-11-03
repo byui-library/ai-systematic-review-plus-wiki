@@ -99,8 +99,9 @@ def build_site(paths: Paths, project: Project, target: str = 'local') -> tuple[P
         logger.removeHandler(warnings)
     out = site_dir(paths, target)
     if target == 'github_pages':
-        for pdf in out.rglob('*.pdf'):   # belt and braces: a public site must never carry full texts
-            pdf.unlink()
+        for path in out.rglob('*'):   # belt and braces: a public site must never carry full texts
+            if path.is_file() and path.suffix.lower() == '.pdf':   # .PDF too: Linux file names are case-sensitive
+                path.unlink()
     if target == 'local':
         state.mark_done(paths, 'site', target=target)
     return out, warnings.messages

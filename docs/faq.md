@@ -34,4 +34,7 @@ Export RIS if it offers that. Otherwise export a CSV with a *Title* column (and 
 That block is the page's data, and the tables and figures are built from it. Leave it in place. To hide it, set *Settings → Editor → Properties in document* to *Hidden*.
 
 **How do I start over?**
-Delete `data/` (except `data/exports/`) and `wiki/`, then run `py run.py import`. Your project settings stay.
+Don't delete `data/` or `wiki/`. They hold your review's audit trail (every AI decision and its history, your validation results) and the pages you've written, which you may need to show reviewers. Instead:
+- **To redo screening with different criteria,** change the question or tier definitions with your assistant. The AI re-screens, and the earlier decisions stay in the audit log.
+- **To start a fresh review,** make a new copy of the template (**Use this template** on GitHub) and leave this one as it is.
+- **To clear things out anyway,** commit everything to git first, so the full history stays recoverable. Then move `data/` and `wiki/` into an `archive/` folder rather than deleting them.
