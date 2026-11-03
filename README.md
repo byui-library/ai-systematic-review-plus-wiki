@@ -37,7 +37,7 @@ Want to try it first? Ask the assistant to *"install the demo"*, or run `py run.
 
 ## Good to know
 
-- **Your data stays yours.** Everything runs on your computer. The AI assistant reads your files the same way it reads any project folder. Nothing is uploaded anywhere unless you publish the website.
+- **Where your data goes.** The pipeline runs on your computer. Your AI assistant is a cloud service, so the text it reads is sent to its provider (Anthropic or OpenAI) to be processed: titles, abstracts, PDF text, and your settings. Check your institution's rules before using unpublished or sensitive material. Nothing else is uploaded unless you set up library lookups or publish the website.
 - **Every AI decision is logged** with its reason, the tool and model, and the date, in `data/checkpoint.json`. Commit `data/` to your private repository: it is your audit trail.
 - **You can change your mind.** Re-running import or prescreen keeps the AI's work. Editing your question or tier definitions makes the AI re-screen, so decisions always match the criteria you report.
 - **Copyright.** PDFs are never committed to git and never put on public websites.

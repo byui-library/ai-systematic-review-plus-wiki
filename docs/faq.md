@@ -12,8 +12,11 @@ That's what the validation step measures: you re-screen a random sample blind an
 **Can a second human reviewer be added?**
 Yes. Draw the validation sample once, give copies of `data/validation.xlsx` to each reviewer, and compare their answers. The template scores one copy at a time against the AI.
 
-**Where are my data stored?**
-In your copy of the template on your computer, and in your private GitHub repository if you push it. Nothing is sent anywhere else, except the AI assistant reading the files you ask it to work on, and LibKey or Unpaywall lookups by DOI if you set them up.
+**Where are my data stored, and what leaves my computer?**
+Your files live in your copy of the template, and in your private GitHub repository if you push it. Three things leave your computer:
+- **Your AI assistant** is a cloud service, so whatever it reads (titles, abstracts, PDF text, your settings) is sent to its provider (Anthropic or OpenAI) for processing. Check your institution's data rules, and your AI account's data settings, before working with unpublished or sensitive material.
+- **LibKey and Unpaywall**, if you set them up, receive each included paper's DOI.
+- **The website**, but only when you publish it.
 
 **Can I change my keywords after importing?**
 Yes. Edit them (or ask the assistant to), then run `py run.py prescreen` again. Papers that were already screened keep their decisions.
