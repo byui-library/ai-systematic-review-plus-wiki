@@ -1,0 +1,124 @@
+{
+  "results": [
+    {
+      "id": "doi:10.1080/02640414.2021.1993642",
+      "tier": 1,
+      "score": 88,
+      "reason": "PCA on RPE + 7 GPS measures across season phases in pro youth soccer — central multivariate-load analysis."
+    },
+    {
+      "id": "doi:10.1080/02701367.2024.2358956",
+      "tier": 1,
+      "score": 85,
+      "reason": "PCA identifies three external-load components and constructs workload scores in U19 elite soccer — central method."
+    },
+    {
+      "id": "doi:10.1080/02701367.2024.2360162",
+      "tier": 1,
+      "score": 80,
+      "reason": "Correlation analysis + clustering identifies key TL/intensity indicators across accelerometer + HR metrics in ice hockey — central dimensionality method."
+    },
+    {
+      "id": "doi:10.1080/17461391.2020.1751305",
+      "tier": 1,
+      "score": 88,
+      "reason": "PCA is central. Identifies representative external load profile from 11 variables, retaining two-thirds of variance in Spanish professional soccer. Textbook dimensionality study."
+    },
+    {
+      "id": "doi:10.1080/24733938.2020.1745264",
+      "tier": 1,
+      "score": 95,
+      "reason": "PCA reduces 46 GPS variables to 5 components in AFL — dimensionality is the central contribution."
+    },
+    {
+      "id": "doi:10.1123/ijspp.2017-0565",
+      "tier": 1,
+      "score": 90,
+      "reason": "Within-participant PCA is the central tool on 4 TL measures (PlayerLoad, TD, HSR, sRPE) in rugby union skills training; 55-70% of variance in PC1 with loadings reported per player — textbook dimensionality study."
+    },
+    {
+      "id": "doi:10.1002/ejsc.70042",
+      "tier": 2,
+      "score": 62,
+      "reason": "PCA for dimensionality reduction of GPS workload before ML modeling in rugby union."
+    },
+    {
+      "id": "doi:10.1080/14763141.2022.2051596",
+      "tier": 2,
+      "score": 75,
+      "reason": "PCA examines relationships between novel lower-extremity IMU load indicators and whole-body external load in football."
+    },
+    {
+      "id": "doi:10.1080/24733938.2020.1837924",
+      "tier": 2,
+      "score": 75,
+      "reason": "PCA identifies 8 uncorrelated components from training load/response measures as secondary analysis; PCA factor loadings drive covariate construction for performance association in AFL."
+    },
+    {
+      "id": "doi:10.1177/1747954121988960",
+      "tier": 2,
+      "score": 62,
+      "reason": "Soccer + PCA applied to fatigue questionnaire structure (3 components), plus correlations between multiple TL measures (TD, PL, HR TRIMP, sRPE) and next-day fatigue. PCA and correlations as secondary analysis."
+    },
+    {
+      "id": "doi:10.3389/fspor.2021.607205",
+      "tier": 2,
+      "score": 65,
+      "reason": "PCA on accumulated workload metrics (jumps, sRPE) in youth basketball, comparing injured vs uninjured groups."
+    },
+    {
+      "id": "doi:10.3390/app15073718",
+      "tier": 2,
+      "score": 55,
+      "reason": "ML prediction of mental fatigue in youth football using GPS + wellness features. Uses correlation matrix and dimensionality reduction as secondary analyses before ML."
+    },
+    {
+      "id": "doi:10.1002/ejsc.70057",
+      "tier": 3,
+      "score": 25,
+      "reason": "GPS + ML for injury prediction in rugby union; primary focus is injury, no metric structure analysis."
+    },
+    {
+      "id": "doi:10.1080/15438627.2023.2297190",
+      "tier": 3,
+      "score": 35,
+      "reason": "Systematic review + meta-analysis of IL/EL-injury relationships and ML prediction in pro soccer. Injury-focused."
+    },
+    {
+      "id": "doi:10.5114/biolsport.2026.153305",
+      "tier": 3,
+      "score": 28,
+      "reason": "[reused from v1] GPS/accelerometry in team sport with external load profiling; primary focus is performance description, training design, or contextual factors without examining metric dimensionality or redundancy."
+    },
+    {
+      "id": "doi:10.1002/ejsc.12191",
+      "tier": 3,
+      "score": 30,
+      "reason": "U-18 EPL academy football; multivariate ANOVA on neuromuscular/perceptual recovery markers vs match — recovery focus, mentions GPS."
+    },
+    {
+      "id": "doi:10.3390/ijerph16203909",
+      "tier": 4,
+      "score": 8,
+      "reason": "Trail running PCA study; individual endurance sport, not a team invasion sport."
+    },
+    {
+      "id": "doi:10.1002/ksa.70180",
+      "tier": 4,
+      "score": 10,
+      "reason": "Scoping review of return-to-performance criteria in soccer; clinical/rehabilitation focus without GPS metric analysis."
+    },
+    {
+      "id": "doi:10.1007/s00421-018-3846-7",
+      "tier": 4,
+      "score": 5,
+      "reason": "Energy expenditure from collision activity in rugby league using doubly labelled water; no GPS/accelerometry metric dimensionality analysis."
+    },
+    {
+      "id": "doi:10.1007/s40279-018-0968-3",
+      "tier": 4,
+      "score": 2,
+      "reason": "Biomechanics review of change of direction, no GPS/accelerometry team sport external load analysis."
+    }
+  ]
+}

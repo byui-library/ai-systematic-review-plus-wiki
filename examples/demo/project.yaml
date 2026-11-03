@@ -1,0 +1,77 @@
+# Demo project: a small slice of a real sports-science search, so you can try every step.
+# Install it with:  py run.py demo     (copies this folder to demo-workspace/)
+
+project:
+  title: 'Demo: structure of wearable workload metrics in team sports'
+  short_name: demo-workload-metrics
+  researcher: ''
+  institution: ''
+
+question: >
+  How do studies use statistical methods such as principal component analysis, factor analysis, or
+  correlation matrices to examine the structure and redundancy of GPS and accelerometer workload
+  metrics in team sports?
+
+picos:
+  population: Team sport athletes (soccer, rugby, Australian football, basketball, hockey, and similar)
+  intervention_or_exposure: GPS, GNSS, or accelerometer wearables measuring external training or match load
+  comparison: ''
+  outcomes: Structure, dimensionality, or redundancy of the workload metrics
+  study_design: Peer-reviewed original research and reviews
+
+sources: [pubmed, wos, ebsco]
+
+prescreen:
+  threshold: 1
+  keyword_groups:
+    - name: technology
+      weight: 1
+      terms: [gps, gnss, accelerometer, wearable, microtechnolog, tracking system, playerload, player load]
+    - name: sport
+      weight: 1
+      terms: [soccer, football, rugby, basketball, hockey, afl, lacrosse, futsal, netball, handball, team sport]
+    - name: load
+      weight: 1
+      terms: [training load, external load, workload, physical demand, match load, high-speed running]
+    - name: analysis
+      weight: 3
+      terms: [principal component, factor analysis, dimensionality, multicollinear, correlation matrix, ' pca ', '(pca)', data reduction, redundan]
+
+tiers:
+  - id: 1
+    label: Core Match
+    included: true
+    definition: >
+      A dimensionality method (PCA, factor analysis, correlation-matrix analysis) applied to GPS or
+      accelerometer load metrics in a team sport is the central tool of the paper.
+  - id: 2
+    label: Strong Match
+    included: true
+    definition: >
+      GPS or accelerometer load in a team sport, with a secondary analysis of how metrics relate,
+      a comparison of metrics, or a review of load-measurement methods.
+  - id: 3
+    label: Peripheral
+    included: false
+    definition: GPS or accelerometer load profiling in a team sport without analysing how metrics relate.
+  - id: 4
+    label: Exclude
+    included: false
+    definition: Individual sports, clinical settings, no wearable load data, or otherwise off topic.
+
+validation: {sample_percent: 20, min_per_tier: 2, seed: 42}
+
+extraction_columns:
+  - {name: Sport, hint: 'sport and level'}
+  - {name: Sample, hint: 'n, sex'}
+  - {name: Device, hint: 'manufacturer and model'}
+  - {name: Method, hint: 'PCA, factor analysis, correlation'}
+  - {name: Key result, hint: 'components found, variance explained'}
+
+concept_axes: [methods, metrics, sports]
+appraisal: {tool: AXIS}
+outputs: {prisma: true, figures: true, knowledge_graph: true}
+pdfs: {libkey: false, unpaywall: false}
+site:
+  title: Demo review wiki
+  targets: [local]

@@ -90,3 +90,12 @@ def test_setup_scripts():
     bash = shutil.which('bash')
     if bash:
         assert subprocess.run([bash, '-n', str(ROOT / 'setup/install-mac.sh')]).returncode == 0
+
+
+def test_every_command_in_the_agent_instructions_parses():
+    import re
+    import shlex
+
+    from run import build_parser
+    for line in re.findall(r'py run\.py ([^`\n]+)', (ROOT / 'AGENTS.md').read_text(encoding='utf-8')):
+        build_parser().parse_args(shlex.split(line.strip()))
