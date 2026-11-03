@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from review import classify, report, stages, state, validate
+from review import classify, figures, graph, pdfs, report, stages, state, tables, validate, wiki
 from review.config import Paths, load_project, summary
 from review.errors import PipelineError
 
@@ -101,6 +101,79 @@ def cmd_report(args, paths: Paths) -> None:
         print(f"Next step: {state.NEXT['pdfs']}")
 
 
+def cmd_pdfs(args, paths: Paths) -> None:
+    project = load_project(paths.root)
+    manual_list = _rel(paths, paths.manual_downloads)
+    if args.match:
+        out = pdfs.match_dropped(paths, project)
+        for m in out['matched']:
+            print(f"  matched {m['file']} -> wiki/{m['saved_as']}")
+        for d in out['duplicates']:
+            print(f"  {d['file']}: that paper already has its PDF; left in place")
+        for name in out['unmatched']:
+            print(f'  {name}: could not tell which paper this is; rename it to the save_as name in {manual_list}')
+        print(f"{len(out['matched'])} matched, {len(out['duplicates'])} duplicate(s), {len(out['unmatched'])} unmatched.")
+    else:
+        out = pdfs.download_all(paths, project)
+        print(f"{out['downloaded']} downloaded, {out['exists']} already present, {out['manual']} need manual download.")
+        if out['manual']:
+            print(f'Open {manual_list}, download each paper through your library, and save it in wiki/raw/inbox/ '
+                  '(any filename). Then run: py run.py pdfs --match')
+    print(f"Next step: {state.NEXT['wiki']}")
+
+
+def cmd_wiki(args, paths: Paths) -> None:
+    project = load_project(paths.root)
+    if args.scaffold:
+        out = wiki.scaffold(paths, project)
+        print(f"{out['created']} paper pages created, {out['refreshed']} stubs refreshed, "
+              f"{out['kept']} written pages kept.")
+        for rel in out['orphaned']:
+            print(f'  {rel}: no longer included; kept so no work is lost (delete it yourself if unwanted)')
+        print('Open the wiki/ folder in Obsidian ("Open folder as vault"). Next step: ask your AI assistant to '
+              '"summarise the next paper" (it follows prompts/03-summarize-papers.md)')
+    elif args.next_paper:
+        task = wiki.next_paper(paths, project)
+        if task is None:
+            print('Every paper page is written. Next step: py run.py wiki --check')
+            return
+        how = ('summarise it to the researcher and wait for confirmation before writing' if task['depth'] == 'deep'
+               else 'write it directly and tag every number [VERIFY]')
+        print(f"Next paper: {task['page']} ({task['depth']}: {how}). Text comes from the {task['source']}.")
+        print(f"Details: {_rel(paths, paths.wiki_task)}. {task['remaining']} more after this one.")
+    elif args.check:
+        out = wiki.check(paths, project)
+        print('Pages by status: ' + ', '.join(f'{k} {v}' for k, v in sorted(out['by_status'].items())))
+        for rel in out['awaiting_confirmation']:
+            print(f'  {rel}: written as a draft; deep pages need the researcher to confirm them (status: confirmed)')
+        for rel in out['unreadable']:
+            print(f'  {rel}: marked unreadable')
+        if out['problems']:
+            raise PipelineError(f"{len(out['problems'])} problem(s) in paper pages:", out['problems'][:30])
+        if out['done']:
+            print('The wiki is complete. Next steps: py run.py wiki --tables, py run.py figures, py run.py graph, '
+                  'then ask your AI assistant to "write the concept and debate pages" (prompts/04-concepts-debates.md)')
+        else:
+            print(f"Not finished yet. Next step: {state.NEXT['wiki']}")
+    elif args.tables:
+        for path in tables.build_tables(paths, project):
+            print(f'  wrote {_rel(paths, path)}')
+    else:
+        print(f'  wrote {_rel(paths, wiki.build_index(paths, project))}')
+
+
+def cmd_figures(args, paths: Paths) -> None:
+    for path in figures.build_figures(paths, load_project(paths.root)):
+        print(f'  wrote {_rel(paths, path)}')
+    print('Figures are shown on wiki/tables/figures.md.')
+
+
+def cmd_graph(args, paths: Paths) -> None:
+    out = graph.build_graph(paths)
+    print(f"{out['nodes']} pages and {out['edges']} links in wiki/tables/knowledge-graph.html "
+          f"({out['unresolved']} link(s) could not be resolved; see wiki/tables/knowledge-graph.md).")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='run.py', description='AI-assisted systematic review pipeline.')
     parser.add_argument('--root', default=str(Path(__file__).resolve().parent),
@@ -125,6 +198,19 @@ def build_parser() -> argparse.ArgumentParser:
     vg.add_argument('--score', action='store_true', help='compare your tiers with the AI and compute kappa')
     v.add_argument('--force', action='store_true', help='with --draw: replace an existing sample')
     sub.add_parser('report', help='write Results.xlsx, CSVs, and (if enabled) the PRISMA flowchart').set_defaults(func=cmd_report)
+    p = sub.add_parser('pdfs', help='download full texts for included papers, or match PDFs you saved by hand')
+    p.set_defaults(func=cmd_pdfs)
+    p.add_argument('--match', action='store_true', help='match PDFs saved in wiki/raw/ (e.g. wiki/raw/inbox/) to papers')
+    w = sub.add_parser('wiki', help='build and check the Obsidian wiki')
+    w.set_defaults(func=cmd_wiki)
+    wg = w.add_mutually_exclusive_group(required=True)
+    wg.add_argument('--scaffold', action='store_true', help='create the vault, paper stubs, and generated pages')
+    wg.add_argument('--next-paper', action='store_true', help='hand the next unwritten paper to the AI (data/wiki_paper.json)')
+    wg.add_argument('--check', action='store_true', help='validate every paper page')
+    wg.add_argument('--tables', action='store_true', help='rebuild extraction and appraisal tables from the pages')
+    wg.add_argument('--index', action='store_true', help='rebuild wiki/index.md')
+    sub.add_parser('figures', help='draw frequency charts into wiki/figures/').set_defaults(func=cmd_figures)
+    sub.add_parser('graph', help='build the interactive knowledge graph').set_defaults(func=cmd_graph)
     return parser
 
 

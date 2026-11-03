@@ -18,7 +18,7 @@ NEXT = {
                 'then py run.py validate --score',
     'report': 'py run.py report',
     'pdfs': 'py run.py pdfs',
-    'wiki': 'Ask your AI assistant to "build the wiki"',
+    'wiki': 'py run.py wiki --scaffold, then ask your AI assistant to "build the wiki" (it follows prompts/03-05)',
     'site': 'py run.py site',
     'publish': 'See docs/08-website.md',
 }
