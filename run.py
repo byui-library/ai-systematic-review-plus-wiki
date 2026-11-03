@@ -143,7 +143,8 @@ def cmd_wiki(args, paths: Paths) -> None:
         print(f"Details: {_rel(paths, paths.wiki_task)}. {task['remaining']} more after this one.")
     elif args.check:
         out = wiki.check(paths, project)
-        print('Pages by status: ' + ', '.join(f'{k} {v}' for k, v in sorted(out['by_status'].items())))
+        counts = sorted((str(k), v) for k, v in out['by_status'].items())   # a missing status shows as None
+        print('Pages by status: ' + ', '.join(f'{k} {v}' for k, v in counts))
         for rel in out['awaiting_confirmation']:
             print(f'  {rel}: written as a draft; deep pages need the researcher to confirm them (status: confirmed)')
         for rel in out['unreadable']:
@@ -161,20 +162,48 @@ def cmd_wiki(args, paths: Paths) -> None:
     elif args.tables:
         for path in tables.build_tables(paths, project):
             print(f'  wrote {_rel(paths, path)}')
+        print(f'Next step: {_after_tables(project)}')
     else:
         print(f'  wrote {_rel(paths, wiki.build_index(paths, project))}')
+        print('Next step: open wiki/index.md in Obsidian to browse the review, or continue with: py run.py status')
+
+
+def _after_tables(project) -> str:
+    if project.outputs.get('figures'):
+        return 'py run.py figures'
+    return _after_figures(project)
+
+
+def _after_figures(project) -> str:
+    if project.outputs.get('knowledge_graph'):
+        return 'py run.py graph'
+    return _after_graph()
+
+
+def _after_graph() -> str:
+    return ('ask your AI assistant to "write the concept and debate pages" (prompts/04-concepts-debates.md), '
+            'or run py run.py status to see what is left')
 
 
 def cmd_figures(args, paths: Paths) -> None:
-    for path in figures.build_figures(paths, load_project(paths.root)):
+    project = load_project(paths.root)
+    if not project.outputs.get('figures'):
+        print(f'Figures are turned off in project.yaml (outputs: figures: false). Next step: {_after_figures(project)}')
+        return
+    for path in figures.build_figures(paths, project):
         print(f'  wrote {_rel(paths, path)}')
-    print('Figures are shown on wiki/tables/figures.md.')
+    print(f'Figures are shown on wiki/tables/figures.md. Next step: {_after_figures(project)}')
 
 
 def cmd_graph(args, paths: Paths) -> None:
+    if not load_project(paths.root).outputs.get('knowledge_graph'):
+        print(f'The knowledge graph is turned off in project.yaml (outputs: knowledge_graph: false). '
+              f'Next step: {_after_graph()}')
+        return
     out = graph.build_graph(paths)
     print(f"{out['nodes']} pages and {out['edges']} links in wiki/tables/knowledge-graph.html "
           f"({out['unresolved']} link(s) could not be resolved; see wiki/tables/knowledge-graph.md).")
+    print(f'Next step: {_after_graph()}')
 
 
 def build_parser() -> argparse.ArgumentParser:

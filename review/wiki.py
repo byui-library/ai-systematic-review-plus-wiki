@@ -46,6 +46,25 @@ def read_page(path: Path) -> tuple[dict, str]:
     return meta, text[m.end():]
 
 
+def read_meta(path: Path) -> dict | None:
+    """Front-matter of a page: {} if the page does not exist, None if its front-matter cannot be read."""
+    if not Path(path).exists():
+        return {}
+    try:
+        return read_page(path)[0]
+    except PipelineError:
+        return None
+
+
+def as_answer(value):
+    """YAML reads a bare yes/no as true/false; turn those back into the words the person typed."""
+    if value is True:
+        return 'yes'
+    if value is False:
+        return 'no'
+    return value
+
+
 def write_page(path: Path, meta: dict, body: str) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -201,7 +220,8 @@ def build_index(paths: Paths, project: Project) -> Path:
         lines += [f'### Tier {tier.id}: {tier.label} ({len(in_tier)})', '']
         for p in in_tier:
             page = wiki_dir / p.page_rel
-            status = (read_page(page)[0].get('status') if page.exists() else None) or 'missing'
+            meta = read_meta(page)
+            status = 'front-matter needs fixing' if meta is None else (meta.get('status') if page.exists() else 'missing')
             title = p.get('title')
             title = title if len(title) <= 90 else title[:89] + '…'
             lines.append(f'- {link(p.page_rel, f"{p.number:02d}")}: {title} ({p.year}) · {status}')
@@ -245,7 +265,8 @@ def scaffold(paths: Paths, project: Project) -> dict:
     counts = Counter()
     for paper in papers:
         page = paths.wiki / paper.page_rel
-        if page.exists() and read_page(page)[0].get('status', 'stub') != 'stub':
+        meta = read_meta(page)
+        if meta is None or (page.exists() and meta.get('status', 'stub') != 'stub'):   # unreadable: never overwrite
             counts['kept'] += 1
             continue
         counts['refreshed' if page.exists() else 'created'] += 1
@@ -328,10 +349,10 @@ def _page_problems(meta: dict, body: str, paper: Paper, project: Project) -> lis
             items = appraisal.get('items') if isinstance(appraisal.get('items'), dict) else {}
             allowed = [a.lower() for a in tool['answers']]
             for key, _ in tool['items']:
-                answer = str(items.get(key) or '').strip().lower()
+                answer = str(as_answer(items.get(key)) or '').strip().lower()
                 if answer not in allowed:
                     problems.append(f"appraisal {key} answer '{items.get(key)}' is not one of {tool['answers']}")
-            overall = str(appraisal.get('overall') or '').strip().lower()
+            overall = str(as_answer(appraisal.get('overall')) or '').strip().lower()
             if overall not in [o.lower() for o in tool['overall']]:
                 problems.append(f"appraisal overall '{appraisal.get('overall')}' is not one of {tool['overall']}")
     return problems

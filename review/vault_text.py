@@ -189,7 +189,7 @@ from those pages by the pipeline.
 def appraisal_checklist(project: Project) -> str:
     tool = checklist(project.appraisal_tool)
     items = markdown_table(['Key', 'Question'], [[key, question] for key, question in tool['items']])
-    example = '\n'.join(f'    {key}: {tool["answers"][0]}' for key, _ in tool['items'][:2])
+    example = '\n'.join(f"    {key}: '{tool['answers'][0]}'" for key, _ in tool['items'][:2])
     return f"""# Appraisal checklist: {project.appraisal_tool}
 
 {BANNER}

@@ -319,6 +319,8 @@ def load_project(root: Path | str) -> Project:
         t['id'] = whole_number(t['id'])
     for g in raw['prescreen']['keyword_groups']:
         g['weight'] = whole_number(g.get('weight', 1))
+    if raw['wiki'].get('deep_tiers') is not None:
+        raw['wiki']['deep_tiers'] = [whole_number(d) for d in raw['wiki']['deep_tiers']]
 
     tiers = tuple(sorted(
         (Tier(t['id'], str(t['label']).strip(), bool(t.get('included', False)), str(t['definition']).strip())

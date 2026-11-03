@@ -27,6 +27,11 @@ def pdf_text(path: Path, max_pages: int = 12, max_chars: int = 60_000) -> str:
     return '\n'.join(parts)[:max_chars].strip()
 
 
+def find_dois(text: str) -> list[str]:
+    """Every DOI in the text, in order, lower-cased, without trailing punctuation."""
+    return [m.group(0).rstrip('.,;:)]}\'"').lower() for m in DOI_RE.finditer(text or '')]
+
+
 def find_doi(text: str) -> str | None:
-    m = DOI_RE.search(text or '')
-    return m.group(0).rstrip('.,;:)]}\'"').lower() if m else None
+    found = find_dois(text)
+    return found[0] if found else None

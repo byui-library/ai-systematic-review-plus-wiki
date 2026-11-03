@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import csv
 import difflib
+import http.client
 import json
 import os
 import re
@@ -22,13 +23,14 @@ from .env import load_env
 from .errors import PipelineError
 from .io import now_iso, read_json, write_json
 from .papers import Paper, included_papers
-from .pdftext import find_doi, pdf_text
+from .pdftext import find_dois, pdf_text
 
 LIBKEY_BASE = 'https://public-api.thirdiron.com/public/v1/libraries/'
 UNPAYWALL_BASE = 'https://api.unpaywall.org/v2/'
 USER_AGENT = 'ai-systematic-review-plus-wiki/1.0 (systematic review full-text retrieval)'
 MIN_PDF_BYTES = 10 * 1024
 TITLE_MATCH = 0.85
+RETRY_DELAY = 2
 MANUAL_FIELDS = ['tier', 'number', 'title', 'year', 'link', 'save_as']
 
 
@@ -48,10 +50,10 @@ def fetch_json(url: str, headers: dict | None = None, timeout: int = 15) -> tupl
         except urllib.error.HTTPError as exc:
             if exc.code < 500 or attempt:
                 return exc.code, None
-        except (urllib.error.URLError, TimeoutError, ValueError):
+        except (OSError, http.client.HTTPException, ValueError):   # dropped connections, timeouts, bad JSON
             if attempt:
                 return 0, None
-        time.sleep(2)
+        time.sleep(RETRY_DELAY)
     return 0, None
 
 
@@ -75,7 +77,7 @@ def fetch_pdf(url: str, dest: Path, timeout: int = 60) -> bool:
         if is_pdf(part):
             os.replace(part, dest)
             return True
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+    except (OSError, http.client.HTTPException, ValueError):   # includes a connection dropped mid-download
         pass
     part.unlink(missing_ok=True)
     return False
@@ -123,24 +125,35 @@ def _norm(text: str) -> str:
     return ' '.join(re.sub(r'[^a-z0-9]+', ' ', (text or '').lower()).split())
 
 
-def _title_score(paper: Paper, stem: str, text: str) -> float:
-    """1.0 when the title appears on the first page; otherwise how closely the filename matches the title."""
+def _filename_score(paper: Paper, stem: str) -> float:
+    """How closely a filename matches the paper's title (filenames are often a shortened title)."""
     title, stem = _norm(paper.get('title')), _norm(stem)
-    if len(title) >= 20 and title in _norm(text[:3000]):
-        return 1.0
     if len(stem) < 20:
         return 0.0
     ratio = difflib.SequenceMatcher(None, stem, title).ratio
     return max(ratio(), difflib.SequenceMatcher(None, stem, title[:len(stem)]).ratio())
 
 
+def _unique(papers: list[Paper]) -> list[Paper]:
+    return list({p.id: p for p in papers}.values())
+
+
 def _identify(path: Path, papers: list[Paper]) -> Paper | None:
+    """Which paper a dropped PDF is. The first pages can cite other papers' DOIs, so a DOI only wins
+    outright when the same paper's title is also on the page; a title alone beats a lone cited DOI."""
     text = pdf_text(path, max_pages=2, max_chars=20_000)
+    page = _norm(text)
     by_doi = {p.get('doi').lower(): p for p in papers if p.get('doi')}
-    found = find_doi(text)
-    if found in by_doi:
-        return by_doi[found]
-    scored = sorted(((_title_score(p, path.stem, text), p) for p in papers), key=lambda s: -s[0])
+    doi_hits = _unique([by_doi[d] for d in find_dois(text) if d in by_doi])
+    titled = [p for p in papers if len(_norm(p.get('title'))) >= 20 and _norm(p.get('title')) in page]
+    confirmed = [p for p in doi_hits if p.id in {t.id for t in titled}]
+    if len(confirmed) == 1:
+        return confirmed[0]
+    if len(titled) == 1:
+        return titled[0]
+    if len(doi_hits) == 1 and not titled:
+        return doi_hits[0]
+    scored = sorted(((_filename_score(p, path.stem), p) for p in papers), key=lambda s: -s[0])
     if scored and scored[0][0] >= TITLE_MATCH and (len(scored) == 1 or scored[1][0] < scored[0][0]):
         return scored[0][1]
     return None
@@ -178,32 +191,33 @@ def download_all(paths: Paths, project: Project, delay: float = 1.0) -> dict:
     papers = included_papers(paths, project)
     log = read_json(paths.pdf_log, {})
     counts: Counter = Counter()
-    manual: list[Paper] = []
-    for paper in papers:
-        dest = paths.wiki / paper.pdf_rel
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        if is_pdf(dest):
-            log[paper.id] = {**log.get(paper.id, {}), 'status': 'exists', 'file': paper.pdf_rel}
-            counts['exists'] += 1
-            continue
-        dest.unlink(missing_ok=True)   # an earlier download that was really an HTML login page
-        attempts, source = [], None
-        if paper.get('doi'):
-            for name, url in _links(paper.get('doi'), env, project):
-                ok = bool(url) and fetch_pdf(url, dest)
-                attempts.append({'source': name, 'url': url, 'result': 'pdf' if ok else ('no link' if not url else 'not a pdf')})
-                if ok:
-                    source = name
-                    break
-            if delay:
-                time.sleep(delay)
-        status = 'downloaded' if source else ('manual' if paper.get('doi') else 'no_doi')
-        log[paper.id] = {'status': status, 'source': source, 'file': paper.pdf_rel, 'attempts': attempts, 'at': now_iso()}
-        counts['downloaded' if source else 'manual'] += 1
-        if not source:
-            manual.append(paper)
-    write_json(paths.pdf_log, log)
-    write_manual_list(paths, manual)
+    try:
+        for paper in papers:
+            dest = paths.wiki / paper.pdf_rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if is_pdf(dest):
+                log[paper.id] = {**log.get(paper.id, {}), 'status': 'exists', 'file': paper.pdf_rel}
+                counts['exists'] += 1
+                continue
+            dest.unlink(missing_ok=True)   # an earlier download that was really an HTML login page
+            attempts, source = [], None
+            if paper.get('doi'):
+                for name, url in _links(paper.get('doi'), env, project):
+                    ok = bool(url) and fetch_pdf(url, dest)
+                    attempts.append({'source': name, 'url': url,
+                                     'result': 'pdf' if ok else ('no link' if not url else 'not a pdf')})
+                    if ok:
+                        source = name
+                        break
+                if delay:
+                    time.sleep(delay)
+            status = 'downloaded' if source else ('manual' if paper.get('doi') else 'no_doi')
+            log[paper.id] = {'status': status, 'source': source, 'file': paper.pdf_rel, 'attempts': attempts,
+                             'at': now_iso()}
+            counts['downloaded' if source else 'manual'] += 1
+    finally:   # even if the run stops (e.g. rejected credentials), keep what was learned so far
+        write_json(paths.pdf_log, log)
+        write_manual_list(paths, [p for p in papers if not is_pdf(paths.wiki / p.pdf_rel)])
     state.mark_done(paths, 'pdfs', downloaded=counts['downloaded'], manual=counts['manual'])
     return {'downloaded': counts['downloaded'], 'exists': counts['exists'], 'manual': counts['manual'],
             'total': len(papers)}
