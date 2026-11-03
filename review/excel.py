@@ -19,12 +19,14 @@ def sheet_name(text: str) -> str:
     return _BAD_SHEET_CHARS.sub('-', text).strip()[:31]
 
 
-def excel_safe(value):
-    """Lists become '; '-joined text; control characters (which openpyxl rejects) are removed."""
+def excel_safe(value, limit: int | None = 32000):
+    """Lists become '; '-joined text; control characters (which openpyxl rejects) are removed.
+
+    Text is cut to `limit` characters (Excel's cell limit); pass None to keep it whole."""
     if isinstance(value, list):
         value = '; '.join(str(v) for v in value)
     if isinstance(value, str):
-        value = ILLEGAL_CHARACTERS_RE.sub('', value)[:32000]
+        value = ILLEGAL_CHARACTERS_RE.sub('', value)[:limit]
     return value
 
 
@@ -46,7 +48,7 @@ def put(ws, row: int, column: int, value):
 
 def csv_safe(value) -> str:
     """A CSV cell that Excel will show as text: formula-like values get a leading apostrophe."""
-    value = excel_safe(value)
+    value = excel_safe(value, limit=None)   # a CSV has no cell limit; keep long values whole for R or Python
     if value is None:
         return ''
     return f"'{value}" if _looks_like_formula(value) else value
