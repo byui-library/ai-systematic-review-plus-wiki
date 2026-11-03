@@ -13,3 +13,6 @@ demo-workspace/
 site/
 *.pdf
 ~$*.xlsx
+
+# Maintainer-only notes
+CLAUDE.local.md

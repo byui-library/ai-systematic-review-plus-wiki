@@ -10,7 +10,7 @@ A public, cloneable template (`byui-library/ai-systematic-review-plus-wiki`) tha
 
 database exports → dedupe → keyword prescreen → AI tiering → human validation sample → Excel report → full-text PDFs → Obsidian wiki → MkDocs website
 
-It is generalized from the Flynn Research pipeline (`C:\Users\milesm\Documents\repos\Flynn Research`), which is the reference implementation. **Read from that repo; never modify it.**
+It is generalized from the pipeline of an earlier sports-science systematic review, which is the reference implementation. Maintainers record its local location in `CLAUDE.local.md` (git-ignored). **Read from that repo; never modify it.**
 
 ## Source of truth
 
@@ -29,9 +29,36 @@ It is generalized from the Flynn Research pipeline (`C:\Users\milesm\Documents\r
 ## Development
 
 ```bash
-py -m venv .venv
-.venv\Scripts\python -m pip install -r setup/requirements.txt
-.venv\Scripts\python -m pytest
+py -3.13 -m venv .venv
+.venv/Scripts/python -m pip install -r setup/requirements.txt
+.venv/Scripts/python -m pytest -q
 ```
 
-Tests must pass on Windows and Ubuntu (CI: `.github/workflows/tests.yml`).
+### Implementation status
+
+| Plan | Scope | Status |
+| --- | --- | --- |
+| [Plan 1](docs/superpowers/plans/2026-11-03-plan-1-core-screening.md) | import, prescreen, classify, validate, report | Done |
+| Plan 2 | PDFs, wiki scaffold, agent wiki passes, figures, knowledge graph | Not yet written |
+| Plan 3 | MkDocs site, publishing targets, remaining playbooks, docs, setup scripts, demo | Not yet written |
+
+Commands available so far: `status`, `check-config`, `import`, `prescreen`, `classify --next-batch [N] | --save FILE --tool T --model M`, `validate --draw [--force] | --score`, `report`. Run `py run.py <command> -h` for options. Use `--root <folder>` to run against a project folder other than the repo root.
+
+### Module map (`review/`)
+
+| Module | Responsibility |
+| --- | --- |
+| `config.py` | `Paths` (every file location), `load_project` (defaults + shape checks + validation of `project.yaml`), `whole_number`, `summary` |
+| `stages.py` | `run_import` and `run_prescreen`: read inputs, write data files, record progress |
+| `importers/` | One parser per export format plus `detect_format`; `import_exports` reads `data/exports/` |
+| `dedup.py` | DOI → PMID → title+year matching; stable ids; `sources[]` |
+| `screen.py` | Hard filters (`exclude` flags) and weighted keyword score (each group counts once) |
+| `classify.py` | Batch out, validated + audited save in (`tool`, `model`, `timestamp`, `history`) |
+| `validate.py` | Stratified blind sample → `validation.xlsx`, Cohen's kappa, draft AI disclosure |
+| `report.py` | `Results.xlsx`, CSVs, opt-in PRISMA |
+| `state.py` | Shared loaders (`load_candidates`, `load_checkpoint`), stage tracking, and next-step text (classify completion is computed from the checkpoint) |
+| `excel.py` | `excel_safe`, `write_table`, `write_pairs`, `save_workbook`. Every workbook goes through these |
+
+Tests must pass on Windows and Ubuntu (CI: `.github/workflows/tests.yml`). Tests use synthetic exports from `tests/fixture_exports.py`; never commit real search data outside `examples/demo/`.
+
+Smoke-tested on the reference review's real exports (PubMed, WoS, and SPORTDiscus; about 760 records): raw counts per source match the reference pipeline exactly, and dedup differs by one record, a genuine duplicate that the title+year key catches.
