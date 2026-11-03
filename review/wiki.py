@@ -18,9 +18,10 @@ from . import state, vault_text
 from .appraisal import checklist
 from .config import Paths, Project
 from .errors import PipelineError
-from .io import read_json
+from .io import read_json, write_json
 from .papers import Paper, included_papers
 from .pdfs import is_pdf
+from .pdftext import pdf_text
 from .prompt import prompt_fingerprint
 
 FILL = '<!-- fill'
@@ -259,3 +260,109 @@ def scaffold(paths: Paths, project: Project) -> dict:
     build_index(paths, project)
     return {'created': counts['created'], 'refreshed': counts['refreshed'], 'kept': counts['kept'],
             'orphaned': orphaned, 'total': len(papers)}
+
+
+# ── paper hand-out ────────────────────────────────────────────────────────────
+
+def _ordered(papers: list[Paper], project: Project) -> list[Paper]:
+    return sorted(papers, key=lambda p: (p.tier not in project.deep_tiers, p.tier, p.number))
+
+
+def _status(paths: Paths, paper: Paper) -> str:
+    page = paths.wiki / paper.page_rel
+    if not page.exists():
+        raise PipelineError(f'{paper.page_rel} does not exist yet. Run: py run.py wiki --scaffold')
+    return read_page(page)[0].get('status', 'stub')
+
+
+def next_paper(paths: Paths, project: Project) -> dict | None:
+    """Write the next stub's details (with its full text) to data/wiki_paper.json for the agent."""
+    stubs = [p for p in _ordered(included_papers(paths, project), project) if _status(paths, p) == 'stub']
+    if not stubs:
+        paths.wiki_task.unlink(missing_ok=True)
+        return None
+    paper = stubs[0]
+    pdf = paths.wiki / paper.pdf_rel
+    text = pdf_text(pdf, max_pages=30, max_chars=80_000) if is_pdf(pdf) else ''
+    tool = checklist(project.appraisal_tool)
+    task = {
+        'id': paper.id,
+        'page': f'wiki/{paper.page_rel}',
+        'depth': _depth(paper, project),
+        'pdf': f'wiki/{paper.pdf_rel}' if text else None,
+        'source': 'pdf' if text else 'abstract',
+        'text': text or paper.get('abstract'),
+        'metadata': {k: paper.get(k) for k in ('title', 'authors', 'year', 'journal', 'doi', 'keywords')},
+        'extraction_columns': project.extraction_columns,
+        'appraisal_tool': project.appraisal_tool,
+        'appraisal_checklist': 'wiki/methods-review/appraisal-checklist.md' if tool else None,
+        'playbook': 'prompts/03-summarize-papers.md',
+        'remaining': len(stubs) - 1,
+    }
+    write_json(paths.wiki_task, task)
+    return task
+
+
+# ── check ─────────────────────────────────────────────────────────────────────
+
+def _page_problems(meta: dict, body: str, paper: Paper, project: Project) -> list[str]:
+    problems = []
+    status = meta.get('status')
+    if status not in STATUSES:
+        return [f"status '{status}' is not one of {', '.join(STATUSES)}"]
+    if meta.get('id') != paper.id:
+        problems.append(f"id '{meta.get('id')}' should be '{paper.id}'")
+    extraction = meta.get('extraction') if isinstance(meta.get('extraction'), dict) else {}
+    missing = [c['name'] for c in project.extraction_columns if c['name'] not in extraction]
+    if missing:
+        problems.append(f'extraction is missing {missing}')
+    if status in ('draft', 'confirmed'):
+        empty = [k for k, v in extraction.items() if v is None or str(v).strip() == '']
+        if empty:
+            problems.append(f'extraction values still empty (use NR if not reported): {empty}')
+        if FILL in body:
+            problems.append(f'{body.count(FILL)} unfinished "{FILL} -->" marker(s) in the text')
+        tool = checklist(project.appraisal_tool)
+        if tool:
+            appraisal = meta.get('appraisal') if isinstance(meta.get('appraisal'), dict) else {}
+            items = appraisal.get('items') if isinstance(appraisal.get('items'), dict) else {}
+            allowed = [a.lower() for a in tool['answers']]
+            for key, _ in tool['items']:
+                answer = str(items.get(key) or '').strip().lower()
+                if answer not in allowed:
+                    problems.append(f"appraisal {key} answer '{items.get(key)}' is not one of {tool['answers']}")
+            overall = str(appraisal.get('overall') or '').strip().lower()
+            if overall not in [o.lower() for o in tool['overall']]:
+                problems.append(f"appraisal overall '{appraisal.get('overall')}' is not one of {tool['overall']}")
+    return problems
+
+
+def check(paths: Paths, project: Project) -> dict:
+    """Validate every paper page. The wiki stage is done when every page is finished and has no problems."""
+    by_status: Counter = Counter()
+    problems, unreadable, awaiting = [], [], []
+    papers = included_papers(paths, project)
+    for paper in papers:
+        page = paths.wiki / paper.page_rel
+        if not page.exists():
+            problems.append(f'{paper.page_rel}: missing. Run: py run.py wiki --scaffold')
+            continue
+        try:
+            meta, body = read_page(page)
+        except PipelineError as err:
+            problems.append(f'{paper.page_rel}: {err}')
+            continue
+        status = meta.get('status')
+        by_status[status] += 1
+        problems += [f'{paper.page_rel}: {p}' for p in _page_problems(meta, body, paper, project)]
+        if status == 'unreadable':
+            unreadable.append(paper.page_rel)
+        if status == 'draft' and paper.tier in project.deep_tiers:
+            awaiting.append(paper.page_rel)
+    done = bool(papers) and not problems and not awaiting and by_status.get('stub', 0) == 0
+    if done:
+        state.mark_done(paths, 'wiki', papers=len(papers))
+    else:
+        state.clear_from(paths, 'wiki')
+    return {'by_status': dict(by_status), 'problems': problems, 'unreadable': unreadable,
+            'awaiting_confirmation': awaiting, 'done': done, 'total': len(papers)}

@@ -132,3 +132,87 @@ def test_index_lists_papers_and_agent_pages(classified):
         assert link in index, link
     axis_index = (paths.wiki / 'concepts/methods/index.md').read_text(encoding='utf-8')
     assert '[[concepts/methods/pca|PCA]]' in axis_index
+
+
+# ── hand-out and check ───────────────────────────────────────────────────────
+
+def _fill(paths, paper, status, **meta_changes):
+    """Write a page the way an agent would: every marker replaced, every value filled."""
+    page = paths.wiki / paper.page_rel
+    meta, body = wiki.read_page(page)
+    meta['extraction'] = {k: 'NR' for k in meta['extraction']}
+    if 'appraisal' in meta:
+        meta['appraisal']['items'] = {k: 'yes' for k in meta['appraisal']['items']}
+        meta['appraisal']['overall'] = 'high'
+    meta.update(status=status, **meta_changes)
+    body = '\n'.join('Written (source: abstract).' if wiki.FILL in line else line for line in body.splitlines())
+    wiki.write_page(page, meta, body)
+
+
+def test_next_paper_hands_out_deep_tier_first_with_text(classified):
+    paths, project = classified
+    papers = _papers(paths, project)
+    make_pdf(paths.wiki / papers[DOE].pdf_rel, 'Full text of the Doe paper about principal components.')
+    wiki.scaffold(paths, project)
+    task = wiki.next_paper(paths, project)
+    assert task['id'] == DOE and task['depth'] == 'deep' and task['source'] == 'pdf'
+    assert 'Full text of the Doe paper' in task['text']
+    assert task['page'] == 'wiki/papers/tier1/01-doe-2021.md' and task['remaining'] == 1
+    assert set(task) >= {'metadata', 'extraction_columns', 'appraisal_tool', 'playbook', 'pdf'}
+    from review.io import read_json
+    assert read_json(paths.wiki_task)['id'] == DOE
+    _fill(paths, papers[DOE], 'confirmed')
+    task = wiki.next_paper(paths, project)
+    assert task['id'] == KIM and task['source'] == 'abstract' and 'Correlation matrix' in task['text']
+    _fill(paths, papers[KIM], 'draft')
+    assert wiki.next_paper(paths, project) is None and not paths.wiki_task.exists()
+
+
+def test_check_reports_problems_and_marks_done(classified):
+    paths, project = classified
+    from review import state
+    wiki.scaffold(paths, project)
+    papers = _papers(paths, project)
+    out = wiki.check(paths, project)
+    assert out['by_status'] == {'stub': 2} and not out['done']
+
+    _fill(paths, papers[DOE], 'draft')                     # deep tier written without confirmation
+    _fill(paths, papers[KIM], 'draft')
+    out = wiki.check(paths, project)
+    assert out['awaiting_confirmation'] == ['papers/tier1/01-doe-2021.md'] and not out['done']
+
+    _fill(paths, papers[DOE], 'confirmed')
+    page = paths.wiki / papers[KIM].page_rel
+    meta, body = wiki.read_page(page)
+    meta['appraisal']['items']['q3'] = 'maybe'
+    wiki.write_page(page, meta, body + f'\n{wiki.FILL} -->\n')
+    problems = '\n'.join(wiki.check(paths, project)['problems'])
+    assert "q3 answer 'maybe'" in problems and 'unfinished' in problems
+
+    _fill(paths, papers[KIM], 'draft')
+    out = wiki.check(paths, project)
+    assert out['done'] and out['problems'] == [] and state.is_done(paths, 'wiki')
+    _fill(paths, papers[KIM], 'stub')
+    assert not wiki.check(paths, project)['done'] and not state.is_done(paths, 'wiki')
+
+
+def test_check_flags_broken_pages(classified):
+    paths, project = classified
+    wiki.scaffold(paths, project)
+    papers = _papers(paths, project)
+    (paths.wiki / papers[DOE].page_rel).write_text('---\nid: [unclosed\n---\nbody', encoding='utf-8')
+    _fill(paths, papers[KIM], 'finished')
+    problems = '\n'.join(wiki.check(paths, project)['problems'])
+    assert 'not valid YAML' in problems and "status 'finished'" in problems
+
+
+def test_unreadable_pages_count_as_done(classified):
+    paths, project = classified
+    wiki.scaffold(paths, project)
+    papers = _papers(paths, project)
+    _fill(paths, papers[DOE], 'confirmed')
+    page = paths.wiki / papers[KIM].page_rel
+    meta, body = wiki.read_page(page)
+    wiki.write_page(page, {**meta, 'status': 'unreadable'}, body)
+    out = wiki.check(paths, project)
+    assert out['done'] and out['unreadable'] == ['papers/tier2/01-kim-2023.md']
