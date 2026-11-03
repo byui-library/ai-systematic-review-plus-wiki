@@ -33,5 +33,5 @@
 ## Rules
 
 - Never edit `data/checkpoint.json` or any other `data/*.json` file directly. Always save through `run.py`.
-- Judge only from what is in the batch. If the abstract is missing, decide from the title and keywords, and say so in the reason.
-- If you can't decide between two tiers and the paper could plausibly meet the more inclusive tier's definition, choose the more inclusive tier (the lower number). The researcher's validation step catches over-inclusion more easily than it catches papers that were missed.
+- Every rule for deciding a tier is inside the batch's `prompt` (including what to do when the abstract is missing or two tiers both seem to fit). This playbook only describes the procedure. Keep decision rules in the prompt, which `review/prompt.py` builds, so that changing a rule retires decisions made under the old one.
+- If the save says the screening criteria changed after the batch was handed out, nothing was saved. Run `py run.py classify --next-batch` again and classify the fresh batch.

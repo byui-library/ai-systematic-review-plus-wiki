@@ -4,7 +4,7 @@ from __future__ import annotations
 from .config import ConfigError, Paths, load_project
 from .errors import PipelineError
 from .io import now_iso, read_json, write_json
-from .prompt import prompt_fingerprint
+from .prompt import paper_fingerprint, prompt_fingerprint
 
 STAGES = ('setup', 'import', 'prescreen', 'classify', 'validate', 'report', 'pdfs', 'wiki', 'site', 'publish')
 
@@ -37,9 +37,10 @@ def load_checkpoint(paths: Paths) -> dict:
     return read_json(paths.checkpoint, {})
 
 
-def is_current_decision(entry: dict | None, fingerprint: str) -> bool:
-    """A saved decision counts while it was made with today's screening prompt (see prompt.py)."""
-    return isinstance(entry, dict) and 'tier' in entry and entry.get('prompt') == fingerprint
+def is_current_decision(entry: dict | None, prompt_fp: str, paper: dict) -> bool:
+    """A saved decision counts while it was made with today's prompt and today's view of the paper."""
+    return (isinstance(entry, dict) and 'tier' in entry and entry.get('prompt') == prompt_fp
+            and entry.get('input') == paper_fingerprint(paper))
 
 
 def classify_counts(paths: Paths, fingerprint: str) -> tuple[int, int] | None:
@@ -48,7 +49,7 @@ def classify_counts(paths: Paths, fingerprint: str) -> tuple[int, int] | None:
     if candidates is None:
         return None
     ckpt = load_checkpoint(paths)
-    return sum(1 for c in candidates if is_current_decision(ckpt.get(c['id']), fingerprint)), len(candidates)
+    return sum(1 for c in candidates if is_current_decision(ckpt.get(c['id']), fingerprint, c)), len(candidates)
 
 
 # ── Stage tracking ────────────────────────────────────────────────────────────

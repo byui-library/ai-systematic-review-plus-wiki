@@ -28,7 +28,7 @@ def collect(paths: Paths, project: Project) -> dict:
     rows, unclassified = [], 0
     for c in state.load_candidates(paths):
         entry = ckpt.get(c['id'])
-        if not state.is_current_decision(entry, fingerprint):
+        if not state.is_current_decision(entry, fingerprint, c):
             unclassified += 1
             continue
         try:
@@ -157,6 +157,8 @@ def run_report(paths: Paths, project: Project) -> dict:
     data = collect(paths, project)
     # Validation statistics describe the decisions they were scored against; show them only while current.
     validation = read_json(paths.validation_results) if state.is_done(paths, 'validate') else None
+    if validation and validation.get('prompt') != prompt_fingerprint(project):
+        validation = None   # scored against decisions made under different criteria
     write_csv(paths.included_csv, data['included'])
     write_csv(paths.excluded_csv, data['excluded'])
     build_excel(paths, project, stats, data, validation)
