@@ -201,3 +201,48 @@ def test_fetch_pdf_accepts_real_pdfs_only(server, tmp_path):
         assert not pdfs.fetch_pdf(f'{base}/{name}', other)
         assert not other.exists()
     assert not list((tmp_path / 'out').glob('*.part'))
+
+
+# ── matching manual drops ────────────────────────────────────────────────────
+
+@pytest.fixture
+def after_failed_download(creds, net):
+    paths, project, _ = creds
+    net()
+    pdfs.download_all(paths, project, delay=0)          # both papers end up on the manual list
+    return paths, project, {p.id: p for p in included_papers(paths, project)}
+
+
+def _manual_titles(paths):
+    with open(paths.manual_downloads, encoding='utf-8-sig', newline='') as f:
+        return [r['title'] for r in csv.DictReader(f)]
+
+
+def test_drop_matched_by_doi_in_text(after_failed_download):
+    paths, project, papers = after_failed_download
+    make_pdf(paths.inbox / 'download (3).pdf', 'Journal X. https://doi.org/10.1000/example.001 Received 2020.')
+    out = pdfs.match_dropped(paths, project)
+    assert [m['id'] for m in out['matched']] == [DOE]
+    assert (paths.wiki / papers[DOE].pdf_rel).exists() and not (paths.inbox / 'download (3).pdf').exists()
+    assert not any('Principal component' in t for t in _manual_titles(paths))
+    assert read_json(paths.pdf_log)[DOE]['status'] == 'matched'
+
+
+def test_drop_matched_by_title_in_filename(after_failed_download):
+    paths, project, papers = after_failed_download
+    make_pdf(paths.raw / 'Redundancy in GPS workload variables.pdf', 'no identifying text')
+    out = pdfs.match_dropped(paths, project)
+    assert [m['id'] for m in out['matched']] == [KIM]
+
+
+def test_unmatched_and_duplicate_drops_are_left_alone(after_failed_download):
+    paths, project, papers = after_failed_download
+    make_pdf(paths.wiki / papers[DOE].pdf_rel, 'already in place 10.1000/example.001')
+    make_pdf(paths.inbox / 'copy.pdf', 'doi 10.1000/example.001')
+    make_pdf(paths.inbox / 'random.pdf', 'Something entirely unrelated')
+    out = pdfs.match_dropped(paths, project)
+    assert out['matched'] == []
+    assert [d['file'] for d in out['duplicates']] == ['raw/inbox/copy.pdf']
+    assert out['unmatched'] == ['raw/inbox/random.pdf']
+    assert (paths.inbox / 'copy.pdf').exists() and (paths.inbox / 'random.pdf').exists()
+    assert (paths.wiki / papers[DOE].pdf_rel).exists()

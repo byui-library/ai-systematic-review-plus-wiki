@@ -5,8 +5,10 @@ Network access goes through `fetch_json` and `fetch_pdf` only, so tests can repl
 from __future__ import annotations
 
 import csv
+import difflib
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -20,11 +22,13 @@ from .env import load_env
 from .errors import PipelineError
 from .io import now_iso, read_json, write_json
 from .papers import Paper, included_papers
+from .pdftext import find_doi, pdf_text
 
 LIBKEY_BASE = 'https://public-api.thirdiron.com/public/v1/libraries/'
 UNPAYWALL_BASE = 'https://api.unpaywall.org/v2/'
 USER_AGENT = 'ai-systematic-review-plus-wiki/1.0 (systematic review full-text retrieval)'
 MIN_PDF_BYTES = 10 * 1024
+TITLE_MATCH = 0.85
 MANUAL_FIELDS = ['tier', 'number', 'title', 'year', 'link', 'save_as']
 
 
@@ -113,6 +117,60 @@ def write_manual_list(paths: Paths, papers: list[Paper]) -> None:
         writer = csv.DictWriter(f, fieldnames=MANUAL_FIELDS)
         writer.writeheader()
         writer.writerows(_manual_row(p) for p in papers)
+
+
+def _norm(text: str) -> str:
+    return ' '.join(re.sub(r'[^a-z0-9]+', ' ', (text or '').lower()).split())
+
+
+def _title_score(paper: Paper, stem: str, text: str) -> float:
+    """1.0 when the title appears on the first page; otherwise how closely the filename matches the title."""
+    title, stem = _norm(paper.get('title')), _norm(stem)
+    if len(title) >= 20 and title in _norm(text[:3000]):
+        return 1.0
+    if len(stem) < 20:
+        return 0.0
+    ratio = difflib.SequenceMatcher(None, stem, title).ratio
+    return max(ratio(), difflib.SequenceMatcher(None, stem, title[:len(stem)]).ratio())
+
+
+def _identify(path: Path, papers: list[Paper]) -> Paper | None:
+    text = pdf_text(path, max_pages=2, max_chars=20_000)
+    by_doi = {p.get('doi').lower(): p for p in papers if p.get('doi')}
+    found = find_doi(text)
+    if found in by_doi:
+        return by_doi[found]
+    scored = sorted(((_title_score(p, path.stem, text), p) for p in papers), key=lambda s: -s[0])
+    if scored and scored[0][0] >= TITLE_MATCH and (len(scored) == 1 or scored[1][0] < scored[0][0]):
+        return scored[0][1]
+    return None
+
+
+def match_dropped(paths: Paths, project: Project) -> dict:
+    """Move PDFs the researcher saved anywhere under wiki/raw/ to their expected names."""
+    papers = included_papers(paths, project)
+    expected = {(paths.wiki / p.pdf_rel).resolve() for p in papers}
+    drops = sorted(f for f in paths.raw.rglob('*.pdf') if f.resolve() not in expected) if paths.raw.exists() else []
+    log = read_json(paths.pdf_log, {})
+    out: dict[str, list] = {'matched': [], 'duplicates': [], 'unmatched': []}
+    for drop in drops:
+        rel = drop.relative_to(paths.wiki).as_posix()
+        paper = _identify(drop, papers)
+        if paper is None:
+            out['unmatched'].append(rel)
+            continue
+        dest = paths.wiki / paper.pdf_rel
+        if is_pdf(dest):
+            out['duplicates'].append({'file': rel, 'id': paper.id})
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(drop, dest)
+        log[paper.id] = {**log.get(paper.id, {}), 'status': 'matched', 'file': paper.pdf_rel,
+                         'matched_from': rel, 'at': now_iso()}
+        out['matched'].append({'file': rel, 'id': paper.id, 'saved_as': paper.pdf_rel})
+    write_json(paths.pdf_log, log)
+    write_manual_list(paths, [p for p in papers if not is_pdf(paths.wiki / p.pdf_rel)])
+    return out
 
 
 def download_all(paths: Paths, project: Project, delay: float = 1.0) -> dict:
