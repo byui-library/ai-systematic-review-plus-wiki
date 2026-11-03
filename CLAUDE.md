@@ -29,9 +29,34 @@ It is generalized from the Flynn Research pipeline (`C:\Users\milesm\Documents\r
 ## Development
 
 ```bash
-py -m venv .venv
-.venv\Scripts\python -m pip install -r setup/requirements.txt
-.venv\Scripts\python -m pytest
+py -3.13 -m venv .venv
+.venv/Scripts/python -m pip install -r setup/requirements.txt
+.venv/Scripts/python -m pytest -q
 ```
 
-Tests must pass on Windows and Ubuntu (CI: `.github/workflows/tests.yml`).
+### Implementation status
+
+| Plan | Scope | Status |
+| --- | --- | --- |
+| [Plan 1](docs/superpowers/plans/2026-11-03-plan-1-core-screening.md) | import, prescreen, classify, validate, report | Done |
+| Plan 2 | PDFs, wiki scaffold, agent wiki passes, figures, knowledge graph | Not yet written |
+| Plan 3 | MkDocs site, publishing targets, remaining playbooks, docs, setup scripts, demo | Not yet written |
+
+Commands available so far: `status`, `check-config`, `import`, `prescreen`, `classify --next-batch [N] | --save FILE --tool T --model M`, `validate --draw [--force] | --score`, `report`. Run `py run.py <command> -h` for options. Use `--root <folder>` to run against a project folder other than the repo root.
+
+### Module map (`review/`)
+
+| Module | Responsibility |
+| --- | --- |
+| `config.py` | `Paths` (every file location), `load_project` (defaults + validation of `project.yaml`), `summary` |
+| `importers/` | One parser per export format plus `detect_format`; `import_exports` reads `data/exports/` |
+| `dedup.py` | DOI → PMID → title+year matching; stable ids; `sources[]` |
+| `screen.py` | Hard filters (`exclude` flags) and weighted keyword score (each group counts once) |
+| `classify.py` | Batch out, validated + audited save in (`tool`, `model`, `timestamp`, `history`) |
+| `validate.py` | Stratified blind sample → `validation.xlsx`, Cohen's kappa, draft AI disclosure |
+| `report.py` | `Results.xlsx`, CSVs, opt-in PRISMA |
+| `state.py` | Stage tracking and next-step text (classify completion is computed from the checkpoint) |
+
+Tests must pass on Windows and Ubuntu (CI: `.github/workflows/tests.yml`). Tests use synthetic exports from `tests/fixture_exports.py`; never commit real search data outside `examples/demo/`.
+
+Smoke-tested on the real Flynn v3 exports: raw counts match Flynn exactly (691 PubMed / 32 WoS / 40 SPORTDiscus), and dedup finds 721 unique versus Flynn's 722. The extra match is a genuine duplicate caught by the title+year key.

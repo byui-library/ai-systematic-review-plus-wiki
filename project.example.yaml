@@ -1,0 +1,87 @@
+# Example project. The setup interview ("set up my review") writes project.yaml for you.
+# You can also copy this file to project.yaml and edit it by hand, then run:
+#   py run.py check-config
+
+project:
+  title: Retrieval practice in undergraduate STEM courses
+  short_name: retrieval-practice        # used in file and site names: lowercase, hyphens
+  researcher: Your Name
+  institution: Your Institution
+  ai_operator: ''                       # person who ran the AI steps, if different
+
+question: >
+  What is the effect of retrieval practice (practice testing, quizzing) on learning outcomes
+  in undergraduate STEM courses, compared with restudying or no intervention?
+
+picos:
+  population: Undergraduate students in STEM courses
+  intervention_or_exposure: Retrieval practice (practice tests, low-stakes quizzes, flashcards with recall)
+  comparison: Restudy, re-reading, or no intervention
+  outcomes: Exam scores, retention, course grades, or other measured learning outcomes
+  study_design: Peer-reviewed experimental or quasi-experimental studies and systematic reviews
+
+# Databases you exported from. Order sets priority when the same paper appears in several.
+sources: [pubmed, wos, ebsco, ris, csv]
+
+prescreen:
+  threshold: 1          # papers scoring below this never reach the AI
+  keyword_groups:       # each group adds its weight once if any term appears (title, abstract, keywords)
+    - name: intervention
+      weight: 1
+      terms: [retrieval practice, practice test, testing effect, quiz, flashcard]
+    - name: population
+      weight: 1
+      terms: [undergraduate, college, university, stem, biology, chemistry, physics, engineering]
+    - name: outcome
+      weight: 3         # the strongest signal gets the highest weight
+      terms: [exam score, retention, learning outcome, achievement, final grade]
+  exclude:
+    retracted: true
+    editorials: true
+    conference_abstracts: true
+    non_english: true
+    no_abstract: true
+
+tiers:
+  - id: 1
+    label: Core Match
+    included: true
+    definition: >
+      Experimental or quasi-experimental study of retrieval practice with undergraduate STEM students
+      that reports a measured learning outcome against a comparison condition.
+  - id: 2
+    label: Strong Match
+    included: true
+    definition: >
+      Systematic review or meta-analysis of retrieval practice that includes undergraduate STEM samples,
+      or a primary study where retrieval practice is one of several compared conditions.
+  - id: 3
+    label: Peripheral
+    included: false
+    definition: >
+      Retrieval practice studied in a related population (high school, medical school, non-STEM) or
+      without a measured learning outcome.
+  - id: 4
+    label: Exclude
+    included: false
+    definition: Not about retrieval practice or not about learning.
+
+validation:
+  sample_percent: 10    # share of each tier you will re-screen yourself
+  min_per_tier: 5
+  seed: 42              # keeps the random sample reproducible
+
+extraction_columns:
+  - {name: Sample, hint: 'n, course, institution type'}
+  - {name: Intervention, hint: 'format, frequency, feedback'}
+  - {name: Comparison, hint: 'restudy, no-quiz, other'}
+  - {name: Outcome measure, hint: 'exam, delayed test, grade'}
+  - {name: Effect, hint: 'direction and size'}
+
+concept_axes: [interventions, outcomes, populations]
+appraisal: {tool: JBI}          # AXIS | CASP | JBI | RoB2 | none
+outputs: {prisma: false, figures: true, knowledge_graph: true}
+pdfs: {libkey: true, unpaywall: true}
+site:
+  title: Retrieval Practice Review
+  targets: [local]              # local | github_pages | openequella
