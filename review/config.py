@@ -34,6 +34,7 @@ DEFAULTS: dict = {
     'pdfs': {'libkey': True, 'unpaywall': True},
     'site': {'title': '', 'targets': ['local']},
     'classify': {'batch_size': 50},
+    'wiki': {'deep_tiers': None},   # None: the first included tier gets the deep, researcher-confirmed pages
 }
 
 
@@ -67,6 +68,14 @@ class Paths:
         self.excluded_csv = self.data / 'excluded.csv'
         self.prisma_png = self.data / 'prisma.png'
         self.state = self.data / 'state.json'
+        self.env = self.root / '.env'
+        self.pdf_log = self.data / 'pdf_log.json'
+        self.manual_downloads = self.data / 'manual_downloads.csv'
+        self.paper_numbers = self.data / 'paper_numbers.json'
+        self.wiki_task = self.data / 'wiki_paper.json'
+        self.wiki = self.root / 'wiki'
+        self.raw = self.wiki / 'raw'
+        self.inbox = self.raw / 'inbox'
 
 
 @dataclass(frozen=True)
@@ -133,6 +142,23 @@ class Project:
     @property
     def included_tier_ids(self) -> list[int]:
         return [t.id for t in self.tiers if t.included]
+
+    @property
+    def deep_tiers(self) -> list[int]:
+        chosen = self.raw['wiki'].get('deep_tiers')
+        return list(chosen) if chosen is not None else self.included_tier_ids[:1]
+
+    @property
+    def extraction_columns(self) -> list[dict]:
+        return [{'name': str(c['name']), 'hint': str(c.get('hint') or '')} for c in self.raw['extraction_columns']]
+
+    @property
+    def concept_axes(self) -> list[str]:
+        return [str(a) for a in self.raw['concept_axes']]
+
+    @property
+    def appraisal_tool(self) -> str:
+        return self.raw['appraisal']['tool']
 
     def tier(self, tier_id: int) -> Tier:
         for t in self.tiers:
@@ -237,6 +263,13 @@ def _problems(raw: dict) -> list[str]:
     if tiers and not any(isinstance(t, dict) and t.get('included') is True for t in tiers):
         p.append('at least one tier must have included: true')
 
+    deep = raw['wiki'].get('deep_tiers')
+    included = {whole_number(t.get('id')) for t in tiers if isinstance(t, dict) and t.get('included') is True}
+    if deep is not None and (not isinstance(deep, list) or any(whole_number(d) not in included for d in deep)):
+        p.append(f'wiki.deep_tiers must list included tier ids (choose from {sorted(included)})')
+    columns = raw.get('extraction_columns') or []
+    if any(not isinstance(c, dict) or not str(c.get('name') or '').strip() for c in columns):
+        p.append('every extraction_columns entry needs a name, for example: {name: Sample, hint: "n, level"}')
     axes = raw.get('concept_axes') or []
     if axes and not 2 <= len(axes) <= 4:
         p.append(f'concept_axes should list 2 to 4 axes (found {len(axes)})')
