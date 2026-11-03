@@ -3,8 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from review.config import Paths
+from review import classify, screen, state
+from review.config import Paths, load_project
+from review.dedup import deduplicate
+from review.importers import import_exports
+from review.io import write_json
 from tests.fixture_exports import write_exports
+from tests.helpers import TIERS
 
 FIXTURES = Path(__file__).parent / 'fixtures'
 
@@ -14,13 +19,6 @@ def workspace(tmp_path):
     shutil.copy(FIXTURES / 'project.yaml', tmp_path / 'project.yaml')
     write_exports(tmp_path / 'data' / 'exports')
     return Paths(tmp_path)
-
-
-from review import screen, state  # noqa: E402
-from review.config import load_project  # noqa: E402
-from review.dedup import deduplicate  # noqa: E402
-from review.importers import import_exports  # noqa: E402
-from review.io import write_json  # noqa: E402
 
 
 @pytest.fixture
@@ -38,3 +36,13 @@ def prescreened(workspace):
     state.mark_done(workspace, 'import')
     state.mark_done(workspace, 'prescreen')
     return workspace, project
+
+
+@pytest.fixture
+def classified(prescreened, tmp_path):
+    paths, project = prescreened
+    results = tmp_path / 'canned.json'
+    write_json(results, {'results': [
+        {'id': pid, 'tier': tier, 'score': 80, 'reason': 'Canned decision.'} for pid, tier in TIERS.items()]})
+    classify.save_results(paths, project, results, 'Claude Code', 'claude-opus-5-5')
+    return paths, project
