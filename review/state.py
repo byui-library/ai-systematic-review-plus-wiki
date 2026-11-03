@@ -43,6 +43,13 @@ def is_current_decision(entry: dict | None, prompt_fp: str, paper: dict) -> bool
             and entry.get('input') == paper_fingerprint(paper))
 
 
+def current_decisions(paths: Paths, prompt_fp: str) -> dict[str, dict]:
+    """Saved decisions that still count, keyed by candidate id (see is_current_decision)."""
+    ckpt = load_checkpoint(paths)
+    return {c['id']: ckpt[c['id']] for c in load_candidates(paths)
+            if is_current_decision(ckpt.get(c['id']), prompt_fp, c)}
+
+
 def classify_counts(paths: Paths, fingerprint: str) -> tuple[int, int] | None:
     """(classified, total) for the current candidates, or None before prescreen."""
     candidates = load_candidates(paths, required=False)

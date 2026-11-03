@@ -202,9 +202,7 @@ def score_sample(paths: Paths, project: Project) -> dict:
 
 def write_disclosure(paths: Paths, project: Project, results: dict) -> None:
     fingerprint = prompt_fingerprint(project)
-    ckpt = state.load_checkpoint(paths)
-    entries = [ckpt[c['id']] for c in state.load_candidates(paths)
-               if state.is_current_decision(ckpt.get(c['id']), fingerprint, c)]
+    entries = list(state.current_decisions(paths, fingerprint).values())
     # The disclosure describes one fixed prompt, so decisions from retired prompt versions are left out.
     decisions = entries + [h for e in entries for h in e.get('history', []) if h.get('prompt') == fingerprint]
     if not decisions:
