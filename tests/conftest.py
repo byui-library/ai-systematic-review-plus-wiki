@@ -3,10 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from review import classify, screen, state
+from review import classify, stages
 from review.config import Paths, load_project
-from review.dedup import deduplicate
-from review.importers import import_exports
 from review.io import write_json
 from tests.fixture_exports import write_exports
 from tests.helpers import TIERS
@@ -24,17 +22,8 @@ def workspace(tmp_path):
 @pytest.fixture
 def prescreened(workspace):
     project = load_project(workspace.root)
-    records, _ = import_exports(workspace.exports, project.sources)
-    unique, stats = deduplicate(records, project.sources)
-    keep, pre_ex = screen.pre_filter(unique, project.exclude)
-    cands, ps_ex = screen.prescreen(keep, project.keyword_groups, project.threshold)
-    stats.update(prefilter_excluded=len(pre_ex), after_prefilter=len(keep),
-                 prescreen_excluded=len(ps_ex), candidates=len(cands))
-    write_json(workspace.records, unique)
-    write_json(workspace.candidates, cands)
-    write_json(workspace.stats, stats)
-    state.mark_done(workspace, 'import')
-    state.mark_done(workspace, 'prescreen')
+    stages.run_import(workspace, project)
+    stages.run_prescreen(workspace, project)
     return workspace, project
 
 

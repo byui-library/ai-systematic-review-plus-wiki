@@ -35,7 +35,7 @@ def import_exports(exports_dir: Path, allowed: list[str]) -> tuple[list[dict], l
             problems.append(f"{f.name}: looks like a '{fmt}' export, but '{fmt}' is not listed under "
                             'sources in project.yaml. Add it there or remove the file.')
             continue
-        parsed = PARSERS[fmt](f)
+        parsed = [r for r in PARSERS[fmt](f) if r['title'] or r['abstract']]   # skip empty shells
         for r in parsed:
             r['export_file'] = f.name
         records.extend(parsed)

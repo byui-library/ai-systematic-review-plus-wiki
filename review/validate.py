@@ -6,17 +6,19 @@ import random
 from collections import defaultdict
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, Font
 
 from . import state
-from .config import Paths, Project
+from .config import Paths, Project, whole_number
 from .errors import PipelineError
+from .excel import save_workbook, write_table
 from .io import now_iso, read_json, write_json
-from .report import excel_safe
 
 SHEET = 'Screen these'
-HEADER = ['#', 'ID', 'Title', 'Year', 'Journal', 'Abstract', 'Your tier', 'Notes']
+ID_COL = 'ID'
 HUMAN_COL = 'Your tier'
+COLUMNS = [('n', '#', 5), ('id', ID_COL, 28), ('title', 'Title', 50), ('year', 'Year', 6),
+           ('journal', 'Journal', 25), ('abstract', 'Abstract', 90), ('human', HUMAN_COL, 10),
+           ('notes', 'Notes', 30)]
 
 
 def cohen_kappa(a: list, b: list) -> float:
@@ -29,10 +31,7 @@ def cohen_kappa(a: list, b: list) -> float:
 
 
 def _classified(paths: Paths) -> tuple[list[dict], dict]:
-    cands = read_json(paths.candidates)
-    if cands is None:
-        raise PipelineError('No candidates yet. Run: py run.py prescreen')
-    ckpt = read_json(paths.checkpoint, {})
+    cands, ckpt = state.load_candidates(paths), state.load_checkpoint(paths)
     missing = sum(1 for c in cands if c['id'] not in ckpt)
     if missing:
         raise PipelineError(f'Finish classifying first: {missing} candidate(s) have no tier yet.')
@@ -51,11 +50,28 @@ def _human_entries(paths: Paths) -> dict:
     finally:
         wb.close()
     header = list(rows[0]) if rows else []
-    missing = [col for col in ('ID', HUMAN_COL) if col not in header]
+    missing = [col for col in (ID_COL, HUMAN_COL) if col not in header]
     if missing:
         raise PipelineError(f'validation.xlsx is missing the column(s) {missing}. {redraw}')
-    id_i, h_i = header.index('ID'), header.index(HUMAN_COL)
+    id_i, h_i = header.index(ID_COL), header.index(HUMAN_COL)
     return {str(r[id_i]): r[h_i] for r in rows[1:] if r[id_i] is not None}
+
+
+def _write_sample_workbook(paths: Paths, project: Project, papers: list[dict]) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = SHEET
+    write_table(ws, COLUMNS, [{**c, 'n': n, 'human': None, 'notes': None} for n, c in enumerate(papers, 1)],
+                freeze='C2')
+    guide = wb.create_sheet('Tier definitions')
+    guide.append(['Read each title and abstract on the first sheet and type the tier number in "Your tier".'])
+    guide.append(['Do not look up the AI decisions until you are finished.'])
+    guide.append([])
+    guide.append(['Tier', 'Label', 'Included in review?', 'Definition'])
+    for t in project.tiers:
+        guide.append([t.id, t.label, 'yes' if t.included else 'no', t.definition])
+    guide.column_dimensions['D'].width = 100
+    save_workbook(wb, paths.validation_xlsx)
 
 
 def draw_sample(paths: Paths, project: Project, force: bool = False) -> dict:
@@ -77,37 +93,8 @@ def draw_sample(paths: Paths, project: Project, force: bool = False) -> dict:
     rng.shuffle(chosen)
     write_json(paths.validation_sample, {'seed': v['seed'], 'ids': chosen,
                                          'ai_tiers': {i: ckpt[i]['tier'] for i in chosen}})
-
     by_id = {c['id']: c for c in cands}
-    wb = Workbook()
-    ws = wb.active
-    ws.title = SHEET
-    ws.append(HEADER)
-    for n, pid in enumerate(chosen, 1):
-        c = by_id[pid]
-        ws.append([n, pid] + [excel_safe(c.get(k) or '') for k in ('title', 'year', 'journal', 'abstract')]
-                  + [None, None])
-    for cell in ws[1]:
-        cell.font = Font(bold=True)
-    for col, width in zip('ABCDEFGH', (5, 28, 50, 6, 25, 90, 10, 30)):
-        ws.column_dimensions[col].width = width
-    for row in ws.iter_rows(min_row=2):
-        for cell in row:
-            cell.alignment = Alignment(wrap_text=True, vertical='top')
-    ws.freeze_panes = 'C2'
-
-    guide = wb.create_sheet('Tier definitions')
-    guide.append(['Read each title and abstract on the first sheet and type the tier number in "Your tier".'])
-    guide.append(['Do not look up the AI decisions until you are finished.'])
-    guide.append([])
-    guide.append(['Tier', 'Label', 'Included in review?', 'Definition'])
-    for t in project.tiers:
-        guide.append([t.id, t.label, 'yes' if t.included else 'no', t.definition])
-    guide.column_dimensions['D'].width = 100
-    try:
-        wb.save(paths.validation_xlsx)
-    except PermissionError as exc:
-        raise PipelineError('Could not write validation.xlsx. If it is open in Excel, close it and run again.') from exc
+    _write_sample_workbook(paths, project, [by_id[i] for i in chosen])
     return {'sampled': len(chosen), 'per_tier': per_tier}
 
 
@@ -118,15 +105,13 @@ def score_sample(paths: Paths, project: Project) -> dict:
     valid = set(project.tier_ids)
     human, problems = {}, []
     for pid, value in _human_entries(paths).items():
-        try:
-            tier = int(float(str(value).strip()))
-        except (TypeError, ValueError):
+        tier = whole_number(value)
+        if tier is None:
             problems.append(f'{pid}: "{value if value is not None else ""}" is not a tier number')
-            continue
-        if tier not in valid:
+        elif tier not in valid:
             problems.append(f'{pid}: tier {tier} is not one of {sorted(valid)}')
-            continue
-        human[pid] = tier
+        else:
+            human[pid] = tier
     if problems:
         raise PipelineError(f'{len(problems)} row(s) in validation.xlsx still need a valid tier:', problems[:20])
 
@@ -160,8 +145,8 @@ def score_sample(paths: Paths, project: Project) -> dict:
 
 
 def write_disclosure(paths: Paths, project: Project, results: dict) -> None:
-    current = {c['id'] for c in read_json(paths.candidates, [])}
-    entries = [e for pid, e in read_json(paths.checkpoint, {}).items() if pid in current]
+    current = {c['id'] for c in state.load_candidates(paths)}
+    entries = [e for pid, e in state.load_checkpoint(paths).items() if pid in current]
     decisions = entries + [h for e in entries for h in e.get('history', [])]
     tools = sorted({f"{d['tool']} ({d['model']})" for d in decisions})
     dates = sorted(d['timestamp'][:10] for d in decisions)

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 csv.field_size_limit(2**31 - 1)   # long abstracts in database CSV/TSV exports
@@ -42,6 +43,13 @@ def split_list(value: str, sep: str = ';') -> list[str]:
 def year_from(value: str) -> str:
     m = re.search(r'(1[89]|20)\d{2}', value or '')
     return m.group(0) if m else ''
+
+
+def read_rows(path: Path | str, **reader_kw) -> Iterator[dict[str, str]]:
+    """CSV/TSV rows with stripped string values. Missing cells are '', overflow cells are dropped."""
+    with open(path, encoding='utf-8-sig', errors='replace', newline='') as f:
+        for raw in csv.DictReader(f, **reader_kw):
+            yield {k.strip(): (v or '').strip() for k, v in raw.items() if k is not None and not isinstance(v, list)}
 
 
 def make_record(source: str, **fields) -> dict:

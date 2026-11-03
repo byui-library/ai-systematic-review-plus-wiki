@@ -8,8 +8,9 @@ from pathlib import Path
 import yaml
 
 from .errors import PipelineError
+from .importers import PARSERS
 
-KNOWN_SOURCES = ('pubmed', 'wos', 'ebsco', 'ris', 'csv')
+KNOWN_SOURCES = tuple(PARSERS)
 APPRAISAL_TOOLS = ('AXIS', 'CASP', 'JBI', 'RoB2', 'none')
 HOSTING_TARGETS = ('local', 'github_pages', 'openequella')
 
@@ -67,7 +68,6 @@ class Paths:
         self.excluded_csv = self.data / 'excluded.csv'
         self.prisma_png = self.data / 'prisma.png'
         self.state = self.data / 'state.json'
-        self.wiki = self.root / 'wiki'
 
 
 @dataclass(frozen=True)
@@ -142,16 +142,52 @@ class Project:
         raise KeyError(tier_id)
 
 
-def _merge(base: dict, override: dict) -> dict:
+def whole_number(value) -> int | None:
+    """A whole number from YAML, JSON, or an Excel cell; None for booleans, fractions, and non-numbers."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            value = float(value.strip())
+        except ValueError:
+            return None
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return None
+
+
+def _merge(base: dict, override: dict, problems: list[str], prefix: str = '') -> dict:
+    """Overlay the user's settings on the defaults. A value of the wrong shape is reported and the default kept."""
     out = copy.deepcopy(base)
-    for key, value in (override or {}).items():
+    for key, value in override.items():
+        default = out.get(key)
         if value is None and key in out:   # `section:` with nothing under it keeps the defaults
             continue
-        if isinstance(value, dict) and isinstance(out.get(key), dict):
-            out[key] = _merge(out[key], value)
+        if isinstance(default, dict):
+            if isinstance(value, dict):
+                out[key] = _merge(default, value, problems, f'{prefix}{key}.')
+            else:
+                problems.append(f'{prefix}{key} should be a section of "name: value" settings')
+        elif isinstance(default, list) and not isinstance(value, list):
+            problems.append(f'{prefix}{key} should be a list, for example: {key}: [a, b]')
         else:
             out[key] = value
     return out
+
+
+def _terms(group: dict) -> list[str]:
+    """Lower-cased search terms; blanks are dropped. Spaces are kept so ' pca ' matches whole words."""
+    terms = group.get('terms')
+    if not isinstance(terms, list):
+        return []
+    return [str(t).lower() for t in terms if t is not None and str(t).strip()]
+
+
+def _at_least_one(value) -> bool:
+    n = whole_number(value)
+    return n is not None and n >= 1
 
 
 def _problems(raw: dict) -> list[str]:
@@ -175,21 +211,21 @@ def _problems(raw: dict) -> list[str]:
         if not isinstance(g, dict) or not g.get('name'):
             p.append(f'prescreen.keyword_groups[{i}] needs a name')
             continue
-        weight = g.get('weight', 1)
-        if not isinstance(weight, int) or isinstance(weight, bool) or weight < 1:
+        if not _at_least_one(g.get('weight', 1)):
             p.append(f"keyword group '{g['name']}' weight must be a whole number of 1 or more")
-        if not isinstance(g.get('terms'), list) or not g['terms']:
-            p.append(f"keyword group '{g['name']}' terms must be a list, for example: terms: [gps, accelerometer]")
+        if not _terms(g):
+            p.append(f"keyword group '{g['name']}' terms must be a list of words or phrases, "
+                     'for example: terms: [gps, accelerometer]')
 
     tiers = raw.get('tiers') or []
     if not 2 <= len(tiers) <= 6:
         p.append(f'tiers must have between 2 and 6 entries (found {len(tiers)})')
     ids = []
     for i, t in enumerate(tiers):
-        if not isinstance(t, dict) or not isinstance(t.get('id'), int) or isinstance(t.get('id'), bool):
+        if not isinstance(t, dict) or whole_number(t.get('id')) is None:
             p.append(f'tiers[{i}] needs a whole-number id')
             continue
-        ids.append(t['id'])
+        ids.append(whole_number(t['id']))
         if not str(t.get('label') or '').strip():
             p.append(f"tier {t['id']} needs a label")
         if not str(t.get('definition') or '').strip():
@@ -207,8 +243,7 @@ def _problems(raw: dict) -> list[str]:
     bad_targets = [t for t in raw['site'].get('targets') or [] if t not in HOSTING_TARGETS]
     if bad_targets:
         p.append(f'site.targets contains unknown entries {bad_targets}; choose from {list(HOSTING_TARGETS)}')
-    size = raw['classify'].get('batch_size')
-    if not isinstance(size, int) or isinstance(size, bool) or size < 1:
+    if not _at_least_one(raw['classify'].get('batch_size')):
         p.append('classify.batch_size must be a whole number of 1 or more')
     pct = raw['validation'].get('sample_percent')
     if not isinstance(pct, (int, float)) or isinstance(pct, bool) or not 0 < pct <= 100:
@@ -230,18 +265,19 @@ def load_project(root: Path | str) -> Project:
     if not isinstance(data, dict):
         raise ConfigError(['project.yaml must be a set of "name: value" settings'])
 
-    raw = _merge(DEFAULTS, data)
-    problems = _problems(raw)
+    problems: list[str] = []
+    raw = _merge(DEFAULTS, data, problems)
+    problems += _problems(raw)
     if problems:
         raise ConfigError(problems)
 
     tiers = tuple(sorted(
-        (Tier(int(t['id']), str(t['label']).strip(), bool(t.get('included', False)),
+        (Tier(whole_number(t['id']), str(t['label']).strip(), bool(t.get('included', False)),
               str(t['definition']).strip()) for t in raw['tiers']),
         key=lambda t: t.id,
     ))
     groups = tuple(
-        KeywordGroup(str(g['name']), int(g.get('weight', 1)), tuple(str(x).lower() for x in g['terms']))
+        KeywordGroup(str(g['name']), whole_number(g.get('weight', 1)), tuple(_terms(g)))
         for g in raw['prescreen']['keyword_groups']
     )
     return Project(raw=raw, tiers=tiers, keyword_groups=groups)

@@ -6,12 +6,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from review import classify, report, screen, state, validate
+from review import classify, report, stages, state, validate
 from review.config import Paths, load_project, summary
-from review.dedup import deduplicate
 from review.errors import PipelineError
-from review.importers import import_exports
-from review.io import read_json, write_json
 
 
 def _rel(paths: Paths, p: Path) -> str:
@@ -32,15 +29,8 @@ def cmd_check_config(args, paths: Paths) -> None:
 
 
 def cmd_import(args, paths: Paths) -> None:
-    project = load_project(paths.root)
-    records, files = import_exports(paths.exports, project.sources)
-    unique, stats = deduplicate(records, project.sources)
-    stats['files'] = files
-    write_json(paths.records, unique)
-    write_json(paths.stats, stats)
-    state.clear_from(paths, 'import')
-    state.mark_done(paths, 'import', unique=len(unique))
-    for f in files:
+    stats = stages.run_import(paths, load_project(paths.root))
+    for f in stats['files']:
         print(f"  {f['file']}: {f['records']} records ({f['format']})")
     print(f"{stats['total_raw']} records found, {stats['unique']} unique after removing "
           f"{stats['duplicates_removed']} duplicates.")
@@ -48,30 +38,16 @@ def cmd_import(args, paths: Paths) -> None:
 
 
 def cmd_prescreen(args, paths: Paths) -> None:
-    project = load_project(paths.root)
-    records = read_json(paths.records)
-    if records is None:
-        raise PipelineError('No imported records yet. Run: py run.py import')
-    keep, pre_ex = screen.pre_filter(records, project.exclude)
-    cands, ps_ex = screen.prescreen(keep, project.keyword_groups, project.threshold)
-    write_json(paths.prefilter_excluded, pre_ex)
-    write_json(paths.prescreen_excluded, ps_ex)
-    write_json(paths.candidates, cands)
-    stats = read_json(paths.stats, {})
-    stats.update(prefilter_excluded=len(pre_ex), after_prefilter=len(keep),
-                 prescreen_excluded=len(ps_ex), candidates=len(cands))
-    write_json(paths.stats, stats)
-    state.clear_from(paths, 'prescreen')
-    state.mark_done(paths, 'prescreen', candidates=len(cands))
-    print(f'{len(pre_ex)} removed by filters, {len(ps_ex)} removed by keyword score, '
-          f'{len(cands)} candidates for AI screening.')
+    c = stages.run_prescreen(paths, load_project(paths.root))
+    print(f"{c['prefilter_excluded']} removed by filters, {c['prescreen_excluded']} removed by keyword score, "
+          f"{c['candidates']} candidates for AI screening.")
     print(f"Next step: {state.NEXT['classify']}")
 
 
 def cmd_classify(args, paths: Paths) -> None:
     project = load_project(paths.root)
     if args.save:
-        out = classify.save_results(paths, project, args.save, args.tool or '', args.model or '')
+        out = classify.save_results(paths, project, args.save, args.tool, args.model)
         tiers = ', '.join(f'tier {t}: {n}' for t, n in out['by_tier'].items())
         print(f"Saved {out['saved']} decisions ({out['new']} new). {out['classified']}/{out['total']} classified, "
               f"{out['remaining']} remaining. ({tiers})")
@@ -121,20 +97,17 @@ def cmd_report(args, paths: Paths) -> None:
         print(f"Next step: {state.NEXT['pdfs']}")
 
 
-HANDLERS = {'status': cmd_status, 'check-config': cmd_check_config, 'import': cmd_import,
-            'prescreen': cmd_prescreen, 'classify': cmd_classify, 'validate': cmd_validate, 'report': cmd_report}
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='run.py', description='AI-assisted systematic review pipeline.')
     parser.add_argument('--root', default=str(Path(__file__).resolve().parent),
                         help='project folder (default: the folder containing run.py)')
-    sub = parser.add_subparsers(dest='command')
-    sub.add_parser('status', help='show progress and the next step')
-    sub.add_parser('check-config', help='validate project.yaml and summarise it')
-    sub.add_parser('import', help='read every export in data/exports/ and remove duplicates')
-    sub.add_parser('prescreen', help='apply filters and keyword scoring')
+    sub = parser.add_subparsers()
+    sub.add_parser('status', help='show progress and the next step').set_defaults(func=cmd_status)
+    sub.add_parser('check-config', help='validate project.yaml and summarise it').set_defaults(func=cmd_check_config)
+    sub.add_parser('import', help='read every export in data/exports/ and remove duplicates').set_defaults(func=cmd_import)
+    sub.add_parser('prescreen', help='apply filters and keyword scoring').set_defaults(func=cmd_prescreen)
     c = sub.add_parser('classify', help='hand out a batch to the AI, or save its decisions')
+    c.set_defaults(func=cmd_classify)
     g = c.add_mutually_exclusive_group()
     g.add_argument('--next-batch', nargs='?', type=int, const=0, metavar='N',
                    help='write the next N unclassified papers to data/classify_batch.json')
@@ -142,11 +115,12 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument('--tool', help='AI tool name for the audit log, e.g. "Claude Code" or "Codex"')
     c.add_argument('--model', help='exact model id for the audit log')
     v = sub.add_parser('validate', help='draw or score the human validation sample')
+    v.set_defaults(func=cmd_validate)
     vg = v.add_mutually_exclusive_group(required=True)
     vg.add_argument('--draw', action='store_true', help='create data/validation.xlsx')
     vg.add_argument('--score', action='store_true', help='compare your tiers with the AI and compute kappa')
     v.add_argument('--force', action='store_true', help='with --draw: replace an existing sample')
-    sub.add_parser('report', help='write Results.xlsx, CSVs, and (if enabled) the PRISMA flowchart')
+    sub.add_parser('report', help='write Results.xlsx, CSVs, and (if enabled) the PRISMA flowchart').set_defaults(func=cmd_report)
     return parser
 
 
@@ -159,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     paths = Paths(Path(args.root))
     try:
-        HANDLERS[args.command or 'status'](args, paths)
+        getattr(args, 'func', cmd_status)(args, paths)
     except PipelineError as err:
         print(f'\nStopped: {err}', file=sys.stderr)
         return 1

@@ -95,3 +95,14 @@ def test_disclosure_ignores_orphan_checkpoint_entries(classified):
     validate.score_sample(paths, project)
     text = paths.ai_disclosure.read_text(encoding='utf-8')
     assert 'Each of the 4 records' in text and 'Old Tool' not in text
+
+
+def test_fractional_human_tier_is_rejected(classified):
+    paths, project = classified
+    validate.draw_sample(paths, project)
+    human = dict(TIERS)
+    human['doi:10.1000/example.004'] = 2.5
+    fill_validation(paths, human)
+    with pytest.raises(PipelineError) as err:
+        validate.score_sample(paths, project)
+    assert '1 row(s)' in str(err.value)

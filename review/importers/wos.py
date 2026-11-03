@@ -4,7 +4,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from .common import make_record, map_language, split_list, year_from
+from .common import make_record, map_language, read_rows, split_list, year_from
 
 PUBTYPE_MAP = {
     'article': 'Journal Article', 'review': 'Review', 'editorial material': 'Editorial',
@@ -16,27 +16,22 @@ PUBTYPE_MAP = {
 
 
 def _pubtypes(dt: str) -> list[str]:
-    out = []
-    for part in (dt or '').replace('/', ';').split(';'):
-        key = part.strip().lower()
-        if key:
-            out.append(PUBTYPE_MAP.get(key, part.strip()))
+    out = [PUBTYPE_MAP.get(p.lower(), p) for p in split_list(dt.replace('/', ';'))]
     return [p for p in out if p]
 
 
 def parse_wos(path: Path | str) -> list[dict]:
     records = []
-    with open(path, encoding='utf-8-sig', errors='replace', newline='') as f:
-        for row in csv.DictReader(f, delimiter='\t', quoting=csv.QUOTE_NONE):
-            def get(key: str) -> str:
-                return (row.get(key) or '').strip()
-            if get('PT') == 'PT' or (not get('TI') and not get('AB')):
-                continue
-            records.append(make_record(
-                'wos',
-                source_id=get('UT'), pmid=get('PM'), doi=get('DI'), title=get('TI'), abstract=get('AB'),
-                authors='; '.join(split_list(get('AU'))), journal=get('SO'), year=year_from(get('PY')),
-                language=map_language(get('LA')), pub_types=_pubtypes(get('DT')),
-                keywords=split_list(get('DE')) + split_list(get('ID')),
-            ))
+    for row in read_rows(path, delimiter='\t', quoting=csv.QUOTE_NONE):
+        if row.get('PT') == 'PT':   # repeated header row in concatenated exports
+            continue
+        records.append(make_record(
+            'wos',
+            source_id=row.get('UT', ''), pmid=row.get('PM', ''), doi=row.get('DI', ''),
+            title=row.get('TI', ''), abstract=row.get('AB', ''),
+            authors='; '.join(split_list(row.get('AU', ''))), journal=row.get('SO', ''),
+            year=year_from(row.get('PY', '')), language=map_language(row.get('LA', '')),
+            pub_types=_pubtypes(row.get('DT', '')),
+            keywords=split_list(row.get('DE', '')) + split_list(row.get('ID', '')),
+        ))
     return records

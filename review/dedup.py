@@ -11,10 +11,11 @@ import unicodedata
 
 _PUNCT = re.compile(r'[^a-z0-9\s]')
 _SPACE = re.compile(r'\s+')
+_QUOTES = str.maketrans({'‘': "'", '’': "'", '“': '"', '”': '"', '–': '-', '—': '-'})
 
 
 def _norm_text(s: str) -> str:
-    s = (s or '').translate(str.maketrans({'‘': "'", '’': "'", '“': '"', '”': '"', '–': '-', '—': '-'}))
+    s = (s or '').translate(_QUOTES)
     s = unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii').lower()
     return _SPACE.sub(' ', _PUNCT.sub(' ', s)).strip()
 

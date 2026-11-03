@@ -19,7 +19,7 @@ def _collect(lines: list[str]) -> list[str]:
 
 
 def parse_pubmed(path: Path | str) -> list[dict]:
-    raw = Path(path).read_text(encoding='utf-8-sig', errors='replace').replace('\r\n', '\n')
+    raw = Path(path).read_text(encoding='utf-8-sig', errors='replace')   # universal newlines: \r\n -> \n
     records = []
     for block in raw.strip().split('\n\n'):
         block = block.strip()

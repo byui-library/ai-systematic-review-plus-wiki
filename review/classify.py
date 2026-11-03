@@ -5,9 +5,9 @@ import json
 from pathlib import Path
 
 from . import state
-from .config import Paths, Project
+from .config import Paths, Project, whole_number
 from .errors import PipelineError
-from .io import now_iso, read_json, write_json
+from .io import now_iso, write_json
 
 PAPER_FIELDS = ('id', 'title', 'abstract', 'year', 'journal', 'keywords', 'pub_types')
 
@@ -35,32 +35,26 @@ def build_prompt(project: Project) -> str:
     )
 
 
-def _candidates(paths: Paths) -> list[dict]:
-    cands = read_json(paths.candidates)
-    if cands is None:
-        raise PipelineError('No candidates yet. Run: py run.py prescreen')
-    return cands
-
-
-def progress(paths: Paths, project: Project) -> dict:
-    cands = _candidates(paths)
-    ckpt = read_json(paths.checkpoint, {})
+def _progress(cands: list[dict], ckpt: dict, project: Project) -> dict:
     by_tier = {t: 0 for t in project.tier_ids}
-    done = 0
     for c in cands:
         entry = ckpt.get(c['id'])
         if entry:
-            done += 1
             by_tier[entry['tier']] = by_tier.get(entry['tier'], 0) + 1
+    done = sum(by_tier.values())
     return {'total': len(cands), 'classified': done, 'remaining': len(cands) - done, 'by_tier': by_tier}
+
+
+def progress(paths: Paths, project: Project) -> dict:
+    return _progress(state.load_candidates(paths), state.load_checkpoint(paths), project)
 
 
 def next_batch(paths: Paths, project: Project, size: int | None = None) -> dict:
     size = project.batch_size if size is None else size
     if size < 1:
         raise PipelineError('Batch size must be 1 or more.')
-    ckpt = read_json(paths.checkpoint, {})
-    todo = [c for c in _candidates(paths) if c['id'] not in ckpt]
+    ckpt = state.load_checkpoint(paths)
+    todo = [c for c in state.load_candidates(paths) if c['id'] not in ckpt]
     papers = [{k: c.get(k) for k in PAPER_FIELDS} for c in todo[:size]]
     batch = {
         'instructions': 'prompts/02-classify.md',
@@ -82,17 +76,26 @@ def _items(data) -> list | None:
     return None
 
 
-def _whole(value) -> int | None:
-    """A whole number, or None. Rejects booleans and fractional values instead of truncating them."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float) and value.is_integer():
-        return int(value)
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
-    return None
+def _item_errors(r: dict, pid: str, candidate_ids: set[str], seen: set[str], tier_ids: set[int]) -> list[str]:
+    errors = []
+    if not pid:
+        errors.append('missing id')
+    elif pid not in candidate_ids:
+        errors.append('id is not a candidate; copy ids exactly from the batch')
+    elif pid in seen:
+        errors.append('listed twice')
+    tier, score = whole_number(r.get('tier')), whole_number(r.get('score'))
+    if tier is None:
+        errors.append('tier must be a whole number')
+    elif tier not in tier_ids:
+        errors.append(f'tier {tier} is not one of {sorted(tier_ids)}')
+    if score is None:
+        errors.append('score must be a whole number')
+    elif not 1 <= score <= 100:
+        errors.append('score must be between 1 and 100')
+    if not str(r.get('reason') or '').strip():
+        errors.append('reason is empty')
+    return errors
 
 
 def validate_results(items, candidate_ids: set[str], tier_ids: set[int]) -> tuple[list[dict], list[str]]:
@@ -104,35 +107,20 @@ def validate_results(items, candidate_ids: set[str], tier_ids: set[int]) -> tupl
             problems.append(f'result {n} is not an object')
             continue
         pid = str(r.get('id') or '').strip()
-        where = f'result {n} (id {pid or "missing"})'
-        before = len(problems)
-        if not pid:
-            problems.append(f'{where}: missing id')
-        elif pid not in candidate_ids:
-            problems.append(f'{where}: id is not a candidate; copy ids exactly from the batch')
-        elif pid in seen:
-            problems.append(f'{where}: listed twice')
-        tier = _whole(r.get('tier'))
-        if tier is None:
-            problems.append(f'{where}: tier must be a whole number')
-        elif tier not in tier_ids:
-            problems.append(f'{where}: tier {tier} is not one of {sorted(tier_ids)}')
-        score = _whole(r.get('score'))
-        if score is None:
-            problems.append(f'{where}: score must be a whole number')
-        elif not 1 <= score <= 100:
-            problems.append(f'{where}: score must be between 1 and 100')
-        reason = str(r.get('reason') or '').strip()
-        if not reason:
-            problems.append(f'{where}: reason is empty')
-        if len(problems) == before:
-            clean.append({'id': pid, 'tier': tier, 'score': score, 'reason': reason})
-            seen.add(pid)
+        errors = _item_errors(r, pid, candidate_ids, seen, tier_ids)
+        if errors:
+            problems += [f'result {n} (id {pid or "missing"}): {e}' for e in errors]
+            continue
+        clean.append({'id': pid, 'tier': whole_number(r['tier']), 'score': whole_number(r['score']),
+                      'reason': str(r['reason']).strip()})
+        seen.add(pid)
     return clean, problems
 
 
-def save_results(paths: Paths, project: Project, results_file: Path | str, tool: str, model: str) -> dict:
-    if not (tool or '').strip() or not (model or '').strip():
+def save_results(paths: Paths, project: Project, results_file: Path | str, tool: str | None,
+                 model: str | None) -> dict:
+    tool, model = (tool or '').strip(), (model or '').strip()
+    if not tool or not model:
         raise PipelineError('Pass --tool and --model so the audit log records which AI made these decisions '
                             '(for example: --tool "Claude Code" --model "claude-opus-5-5").')
     try:
@@ -142,16 +130,16 @@ def save_results(paths: Paths, project: Project, results_file: Path | str, tool:
     except json.JSONDecodeError as exc:
         raise PipelineError(f'Results file is not valid JSON: {exc}') from exc
 
-    ids = {c['id'] for c in _candidates(paths)}
-    clean, problems = validate_results(_items(data), ids, set(project.tier_ids))
+    cands = state.load_candidates(paths)
+    clean, problems = validate_results(_items(data), {c['id'] for c in cands}, set(project.tier_ids))
     if problems:
         raise PipelineError('Nothing was saved. Fix these entries and save again:', problems)
 
-    ckpt = read_json(paths.checkpoint, {})
+    ckpt = state.load_checkpoint(paths)
     stamp, new, changed = now_iso(), 0, False
     for r in clean:
         entry = {'tier': r['tier'], 'score': r['score'], 'reason': r['reason'],
-                 'tool': tool.strip(), 'model': model.strip(), 'timestamp': stamp}
+                 'tool': tool, 'model': model, 'timestamp': stamp}
         previous = ckpt.get(r['id'])
         if previous:
             entry['history'] = previous.pop('history', []) + [previous]
@@ -163,7 +151,7 @@ def save_results(paths: Paths, project: Project, results_file: Path | str, tool:
     if changed:   # earlier decisions moved, so validation statistics and the report are out of date
         state.clear_from(paths, 'validate')
 
-    prog = progress(paths, project)
+    prog = _progress(cands, ckpt, project)
     if prog['remaining'] == 0:
         state.mark_done(paths, 'classify', classified=prog['classified'])
     return {'saved': len(clean), 'new': new, **prog}

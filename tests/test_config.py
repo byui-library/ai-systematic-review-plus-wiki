@@ -77,3 +77,16 @@ def test_scalar_terms_and_bad_batch_size_are_problems(workspace):
         load_project(workspace.root)
     text = '\n'.join(err.value.problems)
     assert 'terms must be a list' in text and 'batch_size' in text
+
+
+def test_wrong_shapes_and_blank_terms_are_problems(workspace):
+    def change(d):
+        d['classify'] = 5
+        d['sources'] = 'pubmed'
+        d['prescreen']['keyword_groups'][1]['terms'] = [None, '  ']
+    _edit(workspace, change)
+    with pytest.raises(ConfigError) as err:
+        load_project(workspace.root)
+    text = '\n'.join(err.value.problems)
+    assert 'classify should be a section' in text and 'sources should be a list' in text
+    assert "keyword group 'sport' terms must be a list" in text

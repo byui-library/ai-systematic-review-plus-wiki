@@ -2,17 +2,15 @@
 from __future__ import annotations
 
 import csv
-import re
 from collections import Counter
 from datetime import date
 
 from openpyxl import Workbook
-from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
-from openpyxl.styles import Alignment, Font, PatternFill
 
 from . import state
 from .config import Paths, Project
 from .errors import PipelineError
+from .excel import excel_safe, save_workbook, sheet_name, write_pairs, write_table
 from .io import read_json
 
 COLUMNS = [
@@ -21,40 +19,21 @@ COLUMNS = [
     ('journal', 'Journal', 30), ('doi', 'DOI', 28), ('sources', 'Found in', 18),
     ('prescreen_score', 'Keyword score', 9), ('abstract', 'Abstract', 80),
 ]
-HEADER_FILL = PatternFill('solid', fgColor='1F4E79')
-HEADER_FONT = Font(bold=True, color='FFFFFF')
-WRAP = Alignment(wrap_text=True, vertical='top')
-_BAD_SHEET_CHARS = re.compile(r'[\[\]:*?/\\]')
-
-
-def sheet_name(text: str) -> str:
-    return _BAD_SHEET_CHARS.sub('-', text).strip()[:31]
-
-
-def excel_safe(value):
-    if isinstance(value, list):
-        value = '; '.join(str(v) for v in value)
-    if isinstance(value, str):
-        value = ILLEGAL_CHARACTERS_RE.sub('', value)[:32000]
-    return value
 
 
 def collect(paths: Paths, project: Project) -> dict:
-    cands = read_json(paths.candidates)
-    if cands is None:
-        raise PipelineError('No candidates yet. Run: py run.py prescreen')
-    ckpt = read_json(paths.checkpoint, {})
-    tiers = {t.id: t for t in project.tiers}
+    ckpt = state.load_checkpoint(paths)
     rows, unclassified = [], 0
-    for c in cands:
+    for c in state.load_candidates(paths):
         entry = ckpt.get(c['id'])
         if entry is None:
             unclassified += 1
             continue
-        tier = tiers.get(entry['tier'])
-        if tier is None:
+        try:
+            tier = project.tier(entry['tier'])
+        except KeyError:
             raise PipelineError(f"Paper {c['id']} is in tier {entry['tier']}, which project.yaml no longer "
-                                'defines. Restore that tier or re-classify the paper.')
+                                'defines. Restore that tier or re-classify the paper.') from None
         rows.append({**c, 'tier': tier.id, 'tier_label': tier.label, 'included': tier.included,
                      'score': entry['score'], 'reason': entry['reason'],
                      'sources': ', '.join(c.get('sources', []))})
@@ -73,26 +52,12 @@ def write_csv(path, rows: list[dict]) -> None:
             writer.writerow({k: excel_safe(r.get(k, '')) for k in fields})
 
 
-def _table(ws, columns, rows: list[dict]) -> None:
-    for col, (_, title, width) in enumerate(columns, 1):
-        cell = ws.cell(row=1, column=col, value=title)
-        cell.fill, cell.font = HEADER_FILL, HEADER_FONT
-        ws.column_dimensions[cell.column_letter].width = width
-    for r_i, row in enumerate(rows, 2):
-        for col, (key, _, _) in enumerate(columns, 1):
-            ws.cell(row=r_i, column=col, value=excel_safe(row.get(key, ''))).alignment = WRAP
-    ws.freeze_panes = 'A2'
-    if rows:
-        ws.auto_filter.ref = f'A1:{ws.cell(row=len(rows) + 1, column=len(columns)).coordinate}'
-
-
-def _key_values(ws, rows: list[tuple]) -> None:
-    for i, (k, v) in enumerate(rows, 1):
-        ws.cell(row=i, column=1, value=k)
-        ws.cell(row=i, column=2, value=excel_safe(v)).alignment = WRAP
-    ws['A1'].font = Font(bold=True, size=14)
-    ws.column_dimensions['A'].width = 48
-    ws.column_dimensions['B'].width = 90
+def validation_rows(v: dict) -> list[tuple]:
+    return [('Validation sample size', v['n']),
+            ('Tier agreement', f"{v['tier_agreement']:.0%}"),
+            ("Cohen's kappa (tier)", v['tier_kappa']),
+            ('Include/exclude agreement', f"{v['include_agreement']:.0%}"),
+            ("Cohen's kappa (include/exclude)", v['include_kappa'])]
 
 
 def _summary_rows(project: Project, stats: dict, data: dict, validation: dict | None) -> list[tuple]:
@@ -112,11 +77,7 @@ def _summary_rows(project: Project, stats: dict, data: dict, validation: dict | 
     if data['unclassified']:
         rows.append(('Not yet classified', data['unclassified']))
     if validation:
-        rows += [('', ''), ('Validation sample size', validation['n']),
-                 ('Tier agreement', f"{validation['tier_agreement']:.0%}"),
-                 ("Cohen's kappa (tier)", validation['tier_kappa']),
-                 ('Include/exclude agreement', f"{validation['include_agreement']:.0%}"),
-                 ("Cohen's kappa (include/exclude)", validation['include_kappa'])]
+        rows += [('', '')] + validation_rows(validation)
     return rows
 
 
@@ -124,35 +85,26 @@ def build_excel(paths: Paths, project: Project, stats: dict, data: dict, validat
     wb = Workbook()
     summary = wb.active
     summary.title = 'Summary'
-    _key_values(summary, _summary_rows(project, stats, data, validation))
+    write_pairs(summary, _summary_rows(project, stats, data, validation))
 
     for t in project.tiers:
         if t.included:
-            _table(wb.create_sheet(sheet_name(f'T{t.id} {t.label}')), COLUMNS,
-                   [r for r in data['included'] if r['tier'] == t.id])
+            write_table(wb.create_sheet(sheet_name(f'T{t.id} {t.label}')), COLUMNS,
+                        [r for r in data['included'] if r['tier'] == t.id])
 
     excluded_ids = [t.id for t in project.tiers if not t.included]
     promote = min(excluded_ids) if excluded_ids else None
-    _table(wb.create_sheet('Excluded'), [('promote', 'Consider promoting?', 12)] + COLUMNS,
-           [{**r, 'promote': 'yes' if r['tier'] == promote else ''} for r in data['excluded']])
+    write_table(wb.create_sheet('Excluded'), [('promote', 'Consider promoting?', 12)] + COLUMNS,
+                [{**r, 'promote': 'yes' if r['tier'] == promote else ''} for r in data['excluded']])
 
     if validation:
-        ws = wb.create_sheet('Validation')
         titles = {r['id']: r.get('title', '') for r in data['included'] + data['excluded']}
-        rows = [('Human validation', ''), ('Sample size', validation['n']),
-                ('Tier agreement', f"{validation['tier_agreement']:.0%}"),
-                ("Cohen's kappa (tier)", validation['tier_kappa']),
-                ('Include/exclude agreement', f"{validation['include_agreement']:.0%}"),
-                ("Cohen's kappa (include/exclude)", validation['include_kappa']), ('', ''),
-                ('Disagreements (AI tier -> your tier)', len(validation['disagreements']))]
+        rows = [('Human validation', '')] + validation_rows(validation) + [
+            ('', ''), ('Disagreements (AI tier -> your tier)', len(validation['disagreements']))]
         rows += [(f"  {d['id']}", f"{d['ai_tier']} -> {d['human_tier']}: {titles.get(d['id'], '')}")
                  for d in validation['disagreements']]
-        _key_values(ws, rows)
-    try:
-        wb.save(paths.results_xlsx)
-    except PermissionError as exc:
-        raise PipelineError(f'Could not write {paths.results_xlsx.name}. If it is open in Excel, close it '
-                            'and run again.') from exc
+        write_pairs(wb.create_sheet('Validation'), rows)
+    save_workbook(wb, paths.results_xlsx)
 
 
 def build_prisma(paths: Paths, project: Project, stats: dict, data: dict) -> None:
@@ -200,7 +152,8 @@ def build_prisma(paths: Paths, project: Project, stats: dict, data: dict) -> Non
 def run_report(paths: Paths, project: Project) -> dict:
     stats = read_json(paths.stats, {})
     data = collect(paths, project)
-    validation = read_json(paths.validation_results)
+    # Validation statistics describe the decisions they were scored against; show them only while current.
+    validation = read_json(paths.validation_results) if state.is_done(paths, 'validate') else None
     write_csv(paths.included_csv, data['included'])
     write_csv(paths.excluded_csv, data['excluded'])
     build_excel(paths, project, stats, data, validation)

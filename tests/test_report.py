@@ -2,7 +2,7 @@ import pytest
 import yaml
 from openpyxl import load_workbook
 
-from review import report, state, validate
+from review import classify, report, state, validate
 from review.config import load_project
 from review.errors import PipelineError
 from tests.helpers import TIERS, fill_validation
@@ -58,3 +58,15 @@ def test_open_workbook_gives_friendly_error(classified, monkeypatch):
     with pytest.raises(PipelineError) as err:
         report.run_report(paths, project)
     assert 'close it' in str(err.value)
+
+
+def test_stale_validation_is_left_out_after_reclassifying(classified, tmp_path):
+    paths, project = classified
+    validate.draw_sample(paths, project)
+    fill_validation(paths, TIERS)
+    validate.score_sample(paths, project)
+    redo = tmp_path / 'redo.json'
+    redo.write_text('{"doi:10.1000/example.006": {"tier": 3, "score": 60, "reason": "Second look."}}', encoding='utf-8')
+    classify.save_results(paths, project, redo, 'Claude Code', 'claude-opus-5-5')
+    report.run_report(paths, project)
+    assert 'Validation' not in load_workbook(paths.results_xlsx).sheetnames

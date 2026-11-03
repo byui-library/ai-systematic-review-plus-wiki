@@ -63,4 +63,4 @@ def parse_ris(path: Path | str) -> list[dict]:
             current[last_tag][-1] = (current[last_tag][-1] + ' ' + line.strip()).strip()
     if current:
         records.append(_to_record(current))
-    return [r for r in records if r['title'] or r['abstract']]
+    return records
