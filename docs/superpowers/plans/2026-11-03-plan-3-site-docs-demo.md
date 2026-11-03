@@ -82,7 +82,7 @@
 ### Task 3: Site build
 - [ ] Tests (`tests/test_site.py`). They use the scaffolded classified fixture with one PDF present, and are skipped if `mkdocs` is not importable.
   - `write_mkdocs_config` writes `mkdocs.yml` with `docs_dir: wiki`, `use_directory_urls: false`, the site name from the project, and the hook path.
-  - `build_site(target='local')` produces `site/index.html` and `site/papers/tier1/01-doe-2021.html`, with the PDF copied under `site/raw/`. `site/tables/knowledge-graph.html` is present when the graph has been built.
+  - `build_site(target='local')` produces `site/index.html` and `site/papers/tier1/01-doe-2021.html`, with the PDF copied under `site/raw/`. `site/tables/graph.html` is present when the graph has been built.
   - `build_site(target='github_pages')` produces `site-github_pages/` with **no** `.pdf` files anywhere and contains `https://doi.org/10.1000/example.001` in Doe's page.
   - The build doesn't fail on the stub placeholders.
   - Building before `wiki --scaffold` gives a `PipelineError` that names the scaffold command.

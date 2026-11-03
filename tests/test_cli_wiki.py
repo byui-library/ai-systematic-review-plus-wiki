@@ -57,7 +57,7 @@ def test_wiki_stage_end_to_end(classified, capsys, monkeypatch):
     for command in (['wiki', '--tables'], ['figures'], ['graph'], ['wiki', '--index']):
         assert main(root + command) == 0, command
     for rel in ('tables/tier1-extraction.md', 'tables/appraisal.md', 'tables/figures.md',
-                'tables/knowledge-graph.html', 'figures/papers-per-tier.png'):
+                'tables/graph.html', 'figures/papers-per-tier.png'):
         assert (paths.wiki / rel).exists(), rel
     capsys.readouterr()
     assert main(root + ['status']) == 0

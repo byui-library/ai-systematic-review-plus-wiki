@@ -27,7 +27,7 @@ def _use_project_venv() -> None:
 if __name__ == '__main__':
     _use_project_venv()
 
-from review import classify, figures, graph, pdfs, report, stages, state, tables, validate, wiki  # noqa: E402
+from review import classify, figures, graph, pdfs, report, site, stages, state, tables, validate, wiki  # noqa: E402
 from review.config import Paths, load_project, summary  # noqa: E402
 from review.errors import PipelineError  # noqa: E402
 
@@ -222,9 +222,32 @@ def cmd_graph(args, paths: Paths) -> None:
               f'Next step: {_after_graph()}')
         return
     out = graph.build_graph(paths)
-    print(f"{out['nodes']} pages and {out['edges']} links in wiki/tables/knowledge-graph.html "
+    print(f"{out['nodes']} pages and {out['edges']} links in wiki/tables/graph.html "
           f"({out['unresolved']} link(s) could not be resolved; see wiki/tables/knowledge-graph.md).")
     print(f'Next step: {_after_graph()}')
+
+
+def cmd_site(args, paths: Paths) -> None:
+    project = load_project(paths.root)
+    if args.serve:
+        print('Previewing the website at http://127.0.0.1:8000 (it updates as pages change). Press Ctrl+C to stop.')
+        site.serve_site(paths, project)
+        return
+    out, warnings = site.build_site(paths, project, args.target)
+    files = sum(1 for f in out.rglob('*') if f.is_file())
+    print(f'Built the {args.target} website in {_rel(paths, out)}/ ({files} files).')
+    if warnings:
+        print(f'{len(warnings)} MkDocs warning(s); the first few:')
+        for message in warnings[:5]:
+            print(f'  {message}')
+    next_steps = {
+        'local': f'open {_rel(paths, out)}/index.html in your browser, or preview with: py run.py site --serve. '
+                 'To put it online, see docs/08-website.md',
+        'github_pages': 'this build contains no PDFs. To put it online, run the "Publish website (GitHub Pages)" '
+                        "workflow from your repository's Actions tab (docs/08-website.md)",
+        'openequella': 'py run.py publish openequella --content-repo <folder of your byui-oeq content repository>',
+    }
+    print(f'Next step: {next_steps[args.target]}')
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -264,6 +287,11 @@ def build_parser() -> argparse.ArgumentParser:
     wg.add_argument('--index', action='store_true', help='rebuild wiki/index.md')
     sub.add_parser('figures', help='draw frequency charts into wiki/figures/').set_defaults(func=cmd_figures)
     sub.add_parser('graph', help='build the interactive knowledge graph').set_defaults(func=cmd_graph)
+    s = sub.add_parser('site', help='build the wiki into a website')
+    s.set_defaults(func=cmd_site)
+    s.add_argument('--target', choices=site.TARGETS, default='local',
+                   help='local (with PDFs), github_pages (public, no PDFs), or openequella (BYU-I sign-in)')
+    s.add_argument('--serve', action='store_true', help='preview locally with live reload instead of building')
     return parser
 
 

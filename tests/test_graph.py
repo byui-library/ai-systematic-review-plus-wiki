@@ -22,7 +22,7 @@ def test_build_graph(classified):
                     '# </script><script>alert(1)</script>\n')
 
     out = graph.build_graph(paths)
-    html = (w / 'tables/knowledge-graph.html').read_text(encoding='utf-8')
+    html = (w / 'tables/graph.html').read_text(encoding='utf-8')
     assert 'https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js' in html
     data = json.loads(re.search(r'const GRAPH = (\{.*?\});', html, re.S).group(1))
     ids = {n['id'] for n in data['nodes']}
@@ -38,4 +38,4 @@ def test_build_graph(classified):
     assert '</script><script>alert(1)</script>' not in html
     assert out['unresolved'] == 2                                                # ambiguous [[pca]] + missing page
     summary = (w / 'tables/knowledge-graph.md').read_text(encoding='utf-8')
-    assert '[Open the interactive graph](knowledge-graph.html)' in summary and 'PCA' in summary
+    assert '[Open the interactive graph](graph.html)' in summary and 'PCA' in summary
