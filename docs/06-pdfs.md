@@ -29,6 +29,18 @@ py run.py pdfs --match
 
 Each file is matched to its paper, by the DOI printed in the PDF or by its title, then renamed and moved into place. Files it can't place are listed and left in the inbox. Rename those to the `save_as` name in the CSV and run `--match` again.
 
+## How the AI reads each paper
+
+When the wiki is built, the AI is given the paper's **entire** text:
+- **Long papers** (reviews, theses) are split into parts at page boundaries, and the AI reads every part. Nothing is cut off.
+- **Tables** in the PDF are also given to the AI as proper tables, so numbers such as loadings or variance explained keep their rows and columns.
+
+## Scanned PDFs
+
+Some older papers are scanned images with no text layer: you can see the words, but you can't select them. The AI can't read these. It works from the abstract instead and tells you which papers were affected.
+
+To fix one, add a text layer, for example in Adobe Acrobat with *Scan & OCR → Recognize Text*, then save the file over the original in `wiki/raw/`. If the paper's wiki page is still a stub, the next `py run.py wiki --next-paper` reads the full text. If the page was already written from the abstract, ask your assistant to rewrite that paper's page from the new PDF.
+
 ## Copyright
 
 PDFs are never committed to git; `.gitignore` excludes them. They appear only on your computer, in the local website, and in the openEQUELLA site, which requires BYU-I sign-in. They never go on GitHub Pages.

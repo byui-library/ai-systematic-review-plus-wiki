@@ -11,6 +11,7 @@
 # Only scratch files that are rewritten on every step are ignored:
 data/classify_batch.json
 data/wiki_paper.json
+data/wiki_paper/
 *.tmp
 
 # ── Generated, rebuilt on demand ──────────────────────────────────────────────
