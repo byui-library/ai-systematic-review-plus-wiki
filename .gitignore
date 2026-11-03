@@ -1,0 +1,15 @@
+# Secrets
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Researcher data and generated outputs
+data/
+demo-workspace/
+site/
+*.pdf
+~$*.xlsx
