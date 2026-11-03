@@ -1,77 +1,56 @@
-# CLAUDE.md
+# Instructions for AI assistants
 
-This file provides guidance to AI coding agents (Claude Code, Codex, and similar) working in this repository.
+You are helping a researcher run an AI-assisted systematic literature review with this template. Most researchers are not programmers, so:
+- explain in plain words, one step at a time
+- run the commands for them
+- read every message the pipeline prints and pass on what it means
 
-> **Status: under construction.** The template is being built from the design spec. This file covers **developing** the template. Once implementation is finished it will be replaced by the researcher-facing agent instructions described in spec §5, and `AGENTS.md` will carry the same body.
+These instructions are identical in `AGENTS.md` (Codex and other agents) and `CLAUDE.md` (Claude Code).
 
-## What this repo is
+## Start every session
 
-A public, cloneable template (`byui-library/ai-systematic-review-plus-wiki`) that runs an AI-assisted systematic literature review on any research question:
+1. Run `py run.py status`. On macOS or Linux, type `python3` instead of `py` in every command. The status shows which stage is next and the exact next step.
+2. If it says the setup is missing (there is no `project.yaml` yet), offer to run the setup interview.
+3. If the researcher just wants to try the template, offer the demo: `py run.py demo`.
 
-database exports → dedupe → keyword prescreen → AI tiering → human validation sample → Excel report → full-text PDFs → Obsidian wiki → MkDocs website
+## What the researcher asks for, and what you do
 
-It is generalized from the pipeline of an earlier sports-science systematic review, which is the reference implementation. Maintainers record its local location in `CLAUDE.local.md` (git-ignored). **Read from that repo; never modify it.**
-
-## Source of truth
-
-- Design spec: [docs/superpowers/specs/2026-11-03-ai-systematic-review-plus-wiki-design.md](docs/superpowers/specs/2026-11-03-ai-systematic-review-plus-wiki-design.md)
-- Implementation plan: `docs/superpowers/plans/` (added once it is written)
-
-## Non-negotiable design rules
-
-1. **Python does all file I/O and the agent only makes judgments.** Every AI step runs `py run.py <step> --next-batch`, then the agent judges using `prompts/NN-*.md`, then `py run.py <step> --save results.json`. Agents never edit `data/*.json` directly.
-2. **Agent-neutral.** AI instructions live only in `prompts/*.md`. `AGENTS.md`, `CLAUDE.md`, and `.claude/commands/` are thin wrappers that point to them.
-3. **Everything project-specific comes from `project.yaml`.** No hardcoded topics, keywords, tiers, paths, or researcher names in `review/`.
-4. **Audience is non-coders.** Every command ends with a plain-English next step or an actionable error.
-5. **No copyrighted PDFs in public outputs.** GitHub Pages builds exclude `raw/`. The demo contains metadata and abstracts only, anonymized.
-6. **Secrets go in `.env`** (LibKey, Unpaywall email) and never in `project.yaml` or git.
-
-## Wiki rules
-
-- Python owns the generated pages (`index.md`, `AGENTS.md`/`CLAUDE.md` in the vault, `tables/`, `concepts/<axis>/index.md`, the methods-review pages except `notes.md`) and rewrites them freely.
-- The agent owns paper pages once they are past `status: stub`, concept and debate pages, sub-reviews, and appends to `log.md`. Re-running the scaffold never overwrites them.
-- Only paper-page **front-matter** is parsed. Never derive data from prose.
-
-## Development
-
-```bash
-py -3.13 -m venv .venv
-.venv/Scripts/python -m pip install -r setup/requirements.txt
-.venv/Scripts/python -m pytest -q
-```
-
-### Implementation status
-
-| Plan | Scope | Status |
-| --- | --- | --- |
-| [Plan 1](docs/superpowers/plans/2026-11-03-plan-1-core-screening.md) | import, prescreen, classify, validate, report | Done |
-| [Plan 2](docs/superpowers/plans/2026-11-03-plan-2-pdfs-and-wiki.md) | PDFs, wiki scaffold, agent wiki passes, figures, knowledge graph | Done |
-| Plan 3 | MkDocs site, publishing targets, remaining playbooks, docs, setup scripts, demo | Not yet written |
-
-Commands available so far: `status`, `check-config`, `import`, `prescreen`, `classify --next-batch [N] | --save FILE --tool T --model M`, `validate --draw [--force] | --score`, `report`, `pdfs [--match]`, `wiki --scaffold | --next-paper | --check | --tables | --index`, `figures`, `graph`. Run `py run.py <command> -h` for options. Use `--root <folder>` to run against a project folder other than the repo root.
-
-### Module map (`review/`)
-
-| Module | Responsibility |
+| The researcher says… | You do |
 | --- | --- |
-| `config.py` | `Paths` (every file location), `load_project` (defaults + shape checks + validation of `project.yaml`), `whole_number`, `summary` |
-| `stages.py` | `run_import` and `run_prescreen`: read inputs, write data files, record progress |
-| `importers/` | One parser per export format plus `detect_format`; `import_exports` reads `data/exports/` |
-| `dedup.py` | DOI → PMID → title+year matching; stable ids; `sources[]` |
-| `screen.py` | Hard filters (`exclude` flags) and weighted keyword score (each group counts once) |
-| `prompt.py` | `build_prompt` (question, PICOS, tiers, **and all decision rules**), `prompt_fingerprint`, `paper_fingerprint`. A saved decision counts only while both fingerprints match: re-running import or prescreen keeps AI work, while editing the criteria or getting new paper information (e.g. an abstract) retires it. Keep decision rules in the prompt, not in `prompts/02-classify.md`, or rule changes won't retire old decisions |
-| `classify.py` | Batch out, validated + audited save in (`tool`, `model`, `timestamp`, `history`) |
-| `validate.py` | Stratified blind sample → `validation.xlsx`, Cohen's kappa, draft AI disclosure |
-| `report.py` | `Results.xlsx`, CSVs, opt-in PRISMA |
-| `state.py` | Shared loaders (`load_candidates`, `load_checkpoint`), stage tracking, and next-step text (classify completion is computed from the checkpoint) |
-| `excel.py` | `excel_safe`, `write_table`, `write_pairs`, `save_workbook`. Every workbook goes through these |
-| `env.py` | `load_env`: reads `.env` (LibKey, Unpaywall); the process environment wins |
-| `papers.py` | `included_papers`: included tiers with **stable** per-tier numbers (`data/paper_numbers.json`, never reused), slugs, PDF names, page paths |
-| `pdftext.py` / `pdfs.py` | PDF text (PyMuPDF) and DOI detection; download via LibKey then Unpaywall, then a manual list; `match_dropped` for files saved in `wiki/raw/inbox/`. All network access goes through `pdfs.fetch_json` and `pdfs.fetch_pdf` (monkeypatched in tests) |
-| `wiki.py` | Page I/O (YAML front-matter), `scaffold`, `next_paper` (writes `data/wiki_paper.json`), `check`, `build_index`, `append_log` |
-| `vault_text.py` / `appraisal.py` | Text of generated pages; built-in AXIS, JBI, CASP, and RoB 2 checklists |
-| `tables.py` / `figures.py` / `graph.py` | Extraction and appraisal tables, charts, and the vis-network knowledge graph, all built from page front-matter and `[[links]]` |
+| "Set up my review" | Follow `prompts/01-setup-interview.md` |
+| "Import my search results" | Check that the exports are in `data/exports/`, then run `py run.py import` and `py run.py prescreen` |
+| "Screen" or "classify the papers" | Follow `prompts/02-classify.md` (in batches, until none remain) |
+| "Check the AI" or "validation" | Run `py run.py validate --draw`. Explain that they re-screen `data/validation.xlsx` themselves without looking at the AI's answers. When they are done, run `py run.py validate --score` |
+| "Make the report" | Run `py run.py report` |
+| "Get the full texts" or "PDFs" | Run `py run.py pdfs`. For papers it could not fetch, they save the PDFs in `wiki/raw/inbox/`; then run `py run.py pdfs --match` |
+| "Build the wiki" or "summarise the papers" | Run `py run.py wiki --scaffold`, then follow `prompts/03-summarize-papers.md` |
+| "Appraise quality" | Follow `prompts/05-quality-appraisal.md` |
+| "Concept pages" or "debates" | Follow `prompts/04-concepts-debates.md` |
+| "A sub-review on…" | Follow `prompts/06-sub-review.md` |
+| "Tables, figures, graph" | Run `py run.py wiki --tables`, `py run.py figures`, `py run.py graph` |
+| "Make the website" | Run `py run.py site` (or preview with `py run.py site --serve`). To publish it, follow `docs/08-website.md` with them |
 
-Tests must pass on Windows and Ubuntu (CI: `.github/workflows/tests.yml`). Tests use synthetic exports from `tests/fixture_exports.py`; never commit real search data outside `examples/demo/`.
+## Rules
 
-Smoke-tested on the reference review's real exports (PubMed, WoS, and SPORTDiscus; about 760 records): raw counts per source match the reference pipeline exactly, and dedup differs by one record, a genuine duplicate that the title+year key catches.
+- **Use `run.py` for every data step.** Never edit, move, or delete files in `data/`; they are the review's audit trail.
+- **Follow the playbooks in `prompts/` exactly.** They are the shared instructions that keep every AI assistant consistent.
+- **Record who did the screening.** When saving classifications, pass your real tool name and exact model id (`--tool`, `--model`). They go into the audit log and the AI-use disclosure.
+- **Ask one question at a time**, and offer choices when you can.
+- **Keep secrets secret.** Credentials and email addresses go in `.env`, never in `project.yaml`. Never print the contents of `.env`.
+- **Never publish or push on your own.** `py run.py publish openequella` commits locally and prints the push command. Push to GitHub, or run the GitHub Pages workflow, only when the researcher asks.
+- **Don't edit generated files**, because they are rebuilt every time: `mkdocs.yml`, `wiki/index.md`, `wiki/tables/`, `wiki/AGENTS.md`, `wiki/CLAUDE.md`, and the methods-review pages (except `notes.md`).
+- **When a command stops with a message**, explain it to the researcher in plain words and do what it says. Don't work around it.
+
+## Where things are
+
+| Path | What it is |
+| --- | --- |
+| `project.yaml` | The review's settings: question, criteria, keywords, tiers. Created by the setup interview |
+| `data/exports/` | The researcher's database exports |
+| `data/` | Screening data and the audit trail (committed to git) |
+| `data/Results.xlsx` | The screening report |
+| `wiki/` | The Obsidian vault: open it with Obsidian's "Open folder as vault" |
+| `prompts/` | Playbooks for AI assistants (01–06) |
+| `docs/` | Guides for the researcher, starting with `docs/01-install.md` |
+
+Developing the template itself? See `docs/development.md`.

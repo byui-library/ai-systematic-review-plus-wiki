@@ -52,3 +52,28 @@ def test_ci_covers_the_oldest_supported_python():
     import yaml
     tests = yaml.safe_load((ROOT / '.github/workflows/tests.yml').read_text(encoding='utf-8'))
     assert '3.11' in tests['jobs']['test']['strategy']['matrix']['python-version']
+
+
+def test_agent_instructions_are_identical_and_reference_every_playbook():
+    agents = (ROOT / 'AGENTS.md').read_text(encoding='utf-8')
+    assert agents == (ROOT / 'CLAUDE.md').read_text(encoding='utf-8')
+    for playbook in sorted((ROOT / 'prompts').glob('[0-9][0-9]-*.md')):
+        assert f'prompts/{playbook.name}' in agents, playbook.name
+    assert 'docs/development.md' in agents and (ROOT / 'docs/development.md').exists()
+
+
+def test_slash_commands_point_at_real_playbooks_and_commands():
+    import re
+    import shlex
+
+    from run import build_parser
+    commands = sorted((ROOT / '.claude/commands').glob('*.md'))
+    assert {c.stem for c in commands} >= {'setup-review', 'classify', 'validate', 'build-wiki', 'appraise',
+                                          'concepts', 'sub-review', 'publish', 'status'}
+    for command in commands:
+        text = command.read_text(encoding='utf-8')
+        assert text.startswith('---\ndescription:'), command.name
+        for playbook in re.findall(r'prompts/[\w.-]+\.md', text):
+            assert (ROOT / playbook).exists(), (command.name, playbook)
+        for line in re.findall(r'py run\.py ([^`\n]+)', text):
+            build_parser().parse_args(shlex.split(line))
