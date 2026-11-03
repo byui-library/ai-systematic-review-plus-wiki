@@ -1,0 +1,30 @@
+project:
+  title: Test review of workload metric structure
+  short_name: test-review
+  researcher: Test Researcher
+question: How do studies examine the structure of wearable-derived workload metrics in team sports?
+picos:
+  population: Team sport athletes
+  intervention_or_exposure: Wearable tracking (GPS or accelerometer)
+  outcomes: Structure of workload metrics
+  study_design: Peer-reviewed original research or reviews
+sources: [pubmed, wos, ebsco, ris, csv]
+prescreen:
+  threshold: 1
+  keyword_groups:
+    - name: technology
+      weight: 1
+      terms: [gps, accelerometer, wearable]
+    - name: sport
+      weight: 1
+      terms: [soccer, rugby, basketball, hockey, futsal]
+    - name: analysis
+      weight: 3
+      terms: [principal component, factor analysis, correlation matrix, redundan, dimensionality]
+tiers:
+  - {id: 1, label: Core Match, included: true, definition: Metric structure analysis is the central aim.}
+  - {id: 2, label: Strong Match, included: true, definition: Metric structure is a secondary analysis.}
+  - {id: 3, label: Peripheral, included: false, definition: Uses wearables in team sport but no structure analysis.}
+  - {id: 4, label: Exclude, included: false, definition: Off topic.}
+validation: {sample_percent: 10, min_per_tier: 5, seed: 42}
+concept_axes: [methods, metrics, sports]
