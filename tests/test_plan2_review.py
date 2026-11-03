@@ -160,3 +160,42 @@ def test_a_cited_doi_does_not_beat_the_papers_own_title(classified):
     out = pdfs.match_dropped(paths, project)
     assert [m['id'] for m in out['matched']] == [KIM]
     assert (paths.wiki / papers[KIM].pdf_rel).exists() and not (paths.wiki / papers[DOE].pdf_rel).exists()
+
+
+# ── second Copilot review on PR #4 ───────────────────────────────────────────
+
+def test_filename_pointing_elsewhere_beats_a_lone_cited_doi(classified):
+    paths, project = classified
+    papers = _papers(paths, project)
+    drop = paths.inbox / 'Redundancy in GPS workload variables a correlation matrix approach.pdf'
+    make_pdf(drop, 'Body text that cites doi:10.1000/example.001 but never prints its own title.')
+    out = pdfs.match_dropped(paths, project)
+    assert out['matched'] == [] and out['unmatched'] == ['raw/inbox/' + drop.name]
+    assert drop.exists() and not (paths.wiki / papers[DOE].pdf_rel).exists()
+
+
+def test_pages_without_an_explicit_stub_status_are_never_overwritten(classified):
+    paths, project = classified
+    wiki.scaffold(paths, project)
+    papers = _papers(paths, project)
+    no_front_matter = paths.wiki / papers[DOE].page_rel
+    no_front_matter.write_text('# Written by hand\n\nKeep me.\n', encoding='utf-8')
+    no_status = paths.wiki / papers[KIM].page_rel
+    meta, body = wiki.read_page(no_status)
+    meta.pop('status')
+    wiki.write_page(no_status, meta, '\nKeep me too.\n')
+    out = wiki.scaffold(paths, project)
+    assert out['kept'] == 2 and out['refreshed'] == 0
+    assert 'Keep me.' in no_front_matter.read_text(encoding='utf-8')
+    assert 'Keep me too.' in no_status.read_text(encoding='utf-8')
+
+
+def test_graph_links_point_at_website_pages(classified):
+    paths, project = classified
+    wiki.scaffold(paths, project)
+    from review import graph
+    graph.build_graph(paths)
+    html = (paths.wiki / 'tables/knowledge-graph.html').read_text(encoding='utf-8')
+    assert '"url": "../papers/tier1/01-doe-2021.html"' in html
+    summary = (paths.wiki / 'tables/knowledge-graph.md').read_text(encoding='utf-8')
+    assert 'published website' in summary and 'Graph view' in summary

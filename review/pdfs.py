@@ -151,12 +151,14 @@ def _identify(path: Path, papers: list[Paper]) -> Paper | None:
         return confirmed[0]
     if len(titled) == 1:
         return titled[0]
-    if len(doi_hits) == 1 and not titled:
-        return doi_hits[0]
     scored = sorted(((_filename_score(p, path.stem), p) for p in papers), key=lambda s: -s[0])
-    if scored and scored[0][0] >= TITLE_MATCH and (len(scored) == 1 or scored[1][0] < scored[0][0]):
-        return scored[0][1]
-    return None
+    by_filename = scored[0][1] if scored and scored[0][0] >= TITLE_MATCH and \
+        (len(scored) == 1 or scored[1][0] < scored[0][0]) else None
+    if len(doi_hits) == 1 and not titled:
+        if by_filename is not None and by_filename.id != doi_hits[0].id:
+            return None   # the DOI may be a citation and the filename names another paper: leave it for a person
+        return doi_hits[0]
+    return by_filename
 
 
 def match_dropped(paths: Paths, project: Project) -> dict:

@@ -266,7 +266,7 @@ def scaffold(paths: Paths, project: Project) -> dict:
     for paper in papers:
         page = paths.wiki / paper.page_rel
         meta = read_meta(page)
-        if meta is None or (page.exists() and meta.get('status', 'stub') != 'stub'):   # unreadable: never overwrite
+        if page.exists() and (meta is None or meta.get('status') != 'stub'):   # only an explicit stub is refreshed
             counts['kept'] += 1
             continue
         counts['refreshed' if page.exists() else 'created'] += 1

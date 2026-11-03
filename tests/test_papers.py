@@ -77,7 +77,7 @@ def test_page_and_pdf_names_survive_metadata_changes(classified, tmp_path):
 
 def test_legacy_number_assignments_are_upgraded(classified):
     paths, project = classified
-    papers = included_papers(paths, project)
+    included_papers(paths, project)   # writes paper_numbers.json in the current format
     numbers = read_json(paths.paper_numbers)
     for tier in numbers.values():
         for paper_id, assignment in tier.items():

@@ -16,13 +16,13 @@
    - `extraction_columns`: what to record, with hints
    - `appraisal_checklist`: if appraisal is configured
 3. Read the text carefully, then decide based on `depth`:
-   - **Deep:** present a structured summary in the chat and **wait for the researcher** to confirm or correct it. Cover the sample, the design, every extraction column, the key results with numbers, and the limitations. Write nothing until they reply. Then write the page with their corrections and set `status: confirmed`.
+   - **Deep:** present a structured summary in the chat and **wait for the researcher** to confirm or correct it. Cover the sample, the design, every extraction column, the key results with numbers, the limitations, and (if appraisal is configured) your appraisal answers. Write nothing until they reply. Then write the page with their corrections and set `status: confirmed`.
    - **Standard:** write the page directly. Put `[VERIFY]` after every quantitative value (n, means, percentages, loadings, p-values) so the researcher can audit it. Set `status: draft`.
    - **Unreadable:** if the text is empty or garbled and there is no usable abstract, set `status: unreadable`. Replace each `<!-- fill … -->` marker with "Not available: no readable full text." Invent nothing.
 4. Fill the page:
    - In the front-matter (between the `---` lines), set every `extraction` value. Write `NR` when the paper does not report it. Separate several values with `; `, for example `PCA; factor analysis`.
    - Replace every `<!-- fill … -->` marker in the text.
-   - If appraisal is configured, complete it now using playbook 05; `wiki --check` validates appraisal values too.
+   - If appraisal is configured, answer the checklist now, following step 2 of playbook 05 (`wiki --check` validates appraisal values too). The paper is already open, so this is the cheapest moment.
    - End every factual claim with `(source: <pdf filename>)` or `(source: abstract)`.
 5. Append a log entry to `wiki/log.md`, using the format in `wiki/AGENTS.md`.
 6. Run `py run.py wiki --check`. Fix any problem it reports for the page you just wrote, then go back to step 1.

@@ -2,6 +2,8 @@
 
 **Goal:** appraise every included paper with the checklist chosen in `project.yaml`, record the answers where the pipeline can read them, and justify each judgment in the page text.
 
+**When to use it:** playbook 03 already uses step 2 below for each paper as it is written. Run this playbook on its own when the appraisal tool changes in `project.yaml` (`wiki --check` then reports an appraisal-tool mismatch on every page), or when the researcher asks to re-check the appraisals.
+
 **Reads:** `wiki/methods-review/appraisal-checklist.md` (items, allowed answers, and overall ratings), the paper pages, and their PDFs in `wiki/raw/`.
 **Writes:** the `appraisal` front-matter and the *Appraisal* section of each paper page, and `wiki/log.md` (append only).
 
@@ -10,7 +12,7 @@
 1. Open `wiki/methods-review/appraisal-checklist.md`. If it does not exist, appraisal is switched off (`appraisal: {tool: none}`). Stop and tell the researcher.
 2. Work through the paper pages in `wiki/papers/`, deepest tier first. For each page:
    1. Read the paper. Use the PDF where there is one; otherwise use the page and the abstract.
-   2. In the front-matter, set every key under `appraisal.items` to one of the allowed answers, exactly as written on the checklist page.
+   2. In the front-matter, set `appraisal.tool` to the configured tool and every key under `appraisal.items` to one of the allowed answers, exactly as written on the checklist page. If the page still has items from a different tool, replace them with the current checklist's keys.
    3. Set `appraisal.overall` to one of the allowed overall ratings.
    4. In the page's *Appraisal* section, explain every answer that is not favourable (and any `unclear`) in one sentence each, citing `(source: <pdf filename>)`.
    5. For deep-tier papers, show the researcher your answers and wait for confirmation before saving.
