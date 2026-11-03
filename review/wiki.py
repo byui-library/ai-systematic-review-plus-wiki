@@ -115,7 +115,8 @@ def _pdf_link(paper: Paper) -> str:
 def _stub(paper: Paper, project: Project, has_pdf: bool) -> tuple[dict, str]:
     tool = checklist(project.appraisal_tool)
     meta = {
-        'id': paper.id, 'title': paper.get('title'), 'year': paper.year, 'tier': paper.tier,
+        'id': paper.id, 'doi': paper.get('doi') or None, 'title': paper.get('title'), 'year': paper.year,
+        'tier': paper.tier,
         'number': paper.number, 'depth': _depth(paper, project), 'status': 'stub',
         'pdf': _pdf_link(paper) if has_pdf else None,
         'extraction': {c['name']: None for c in project.extraction_columns},

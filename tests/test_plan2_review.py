@@ -138,7 +138,7 @@ def test_output_switches_are_respected(classified, capsys):
     assert main(root + ['figures']) == 0 and main(root + ['graph']) == 0
     out = capsys.readouterr().out
     assert out.count('turned off in project.yaml') == 2
-    assert not (paths.wiki / 'tables/figures.md').exists() and not (paths.wiki / 'tables/knowledge-graph.html').exists()
+    assert not (paths.wiki / 'tables/figures.md').exists() and not (paths.wiki / 'tables/graph.html').exists()
 
 
 def test_every_wiki_command_ends_with_a_next_step(classified, capsys):
@@ -195,7 +195,7 @@ def test_graph_links_point_at_website_pages(classified):
     wiki.scaffold(paths, project)
     from review import graph
     graph.build_graph(paths)
-    html = (paths.wiki / 'tables/knowledge-graph.html').read_text(encoding='utf-8')
+    html = (paths.wiki / 'tables/graph.html').read_text(encoding='utf-8')
     assert '"url": "../papers/tier1/01-doe-2021.html"' in html
     summary = (paths.wiki / 'tables/knowledge-graph.md').read_text(encoding='utf-8')
     assert 'published website' in summary and 'Graph view' in summary

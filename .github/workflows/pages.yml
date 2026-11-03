@@ -1,0 +1,43 @@
+# Publishes the wiki as a public website on GitHub Pages. It runs only when you start it:
+# Actions tab > "Publish website (GitHub Pages)" > Run workflow.
+# The public build never includes PDFs (they are copyrighted); "Open PDF" links become publisher links.
+# One-time setup: Settings > Pages > Source: "GitHub Actions". See docs/08-website.md.
+name: Publish website (GitHub Pages)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r setup/requirements.txt
+      - run: python run.py site --target github_pages
+        env:
+          REVIEW_NO_VENV: '1'
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site-github_pages
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

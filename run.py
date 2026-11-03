@@ -3,12 +3,60 @@
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
 import sys
 from pathlib import Path
 
-from review import classify, figures, graph, pdfs, report, stages, state, tables, validate, wiki
-from review.config import Paths, load_project, summary
-from review.errors import PipelineError
+
+def _use_project_venv() -> None:
+    """Re-run with the project's .venv Python, so `py run.py` works without activating anything.
+
+    Only the standard library may be used above this point: the packages live in .venv.
+    """
+    if os.environ.get('REVIEW_NO_VENV'):
+        return
+    venv = Path(__file__).resolve().parent / '.venv'
+    python = venv / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+    if not python.exists() or Path(sys.prefix).resolve() == venv.resolve():
+        return
+    home = next((line.split('=', 1)[1].strip() for line in _read(venv / 'pyvenv.cfg').splitlines()
+                 if line.split('=', 1)[0].strip() == 'home'), '')
+    if home and not Path(home).exists():
+        sys.exit(f'The private Python environment in .venv points to a Python that is no longer installed ({home}).\n'
+                 'Delete the .venv folder and run the setup script again (setup/install-windows.bat or '
+                 'setup/install-mac.sh).')
+    child = subprocess.Popen([str(python), str(Path(__file__).resolve()), *sys.argv[1:]],
+                             env={**os.environ, 'REVIEW_NO_VENV': '1'})
+    try:
+        sys.exit(child.wait())
+    except KeyboardInterrupt:   # Ctrl+C reaches both processes; let the command stop on its own
+        try:
+            child.wait(timeout=10)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            child.kill()
+        sys.exit(130)
+
+
+def _read(path: Path) -> str:
+    try:
+        return path.read_text(encoding='utf-8')
+    except OSError:
+        return ''
+
+
+if __name__ == '__main__':
+    _use_project_venv()
+
+try:
+    from review import (classify, demo, figures, graph, pdfs, publish, report, site, stages, state,  # noqa: E402
+                        tables, validate, wiki)
+    from review.config import Paths, load_project, summary  # noqa: E402
+    from review.errors import PipelineError  # noqa: E402
+except ImportError as exc:
+    sys.exit(f'A package this template needs is missing ({exc}).\n'
+             'Run the setup script again: double-click setup/install-windows.bat on Windows, or run '
+             'bash setup/install-mac.sh on a Mac.')
 
 
 def _rel(paths: Paths, p: Path) -> str:
@@ -201,9 +249,75 @@ def cmd_graph(args, paths: Paths) -> None:
               f'Next step: {_after_graph()}')
         return
     out = graph.build_graph(paths)
-    print(f"{out['nodes']} pages and {out['edges']} links in wiki/tables/knowledge-graph.html "
+    print(f"{out['nodes']} pages and {out['edges']} links in wiki/tables/graph.html "
           f"({out['unresolved']} link(s) could not be resolved; see wiki/tables/knowledge-graph.md).")
     print(f'Next step: {_after_graph()}')
+
+
+def cmd_site(args, paths: Paths) -> None:
+    project = load_project(paths.root)
+    if args.serve:
+        print('Previewing the website at http://127.0.0.1:8000 (it updates as pages change). Press Ctrl+C to stop.')
+        site.serve_site(paths, project)
+        return
+    out, warnings = site.build_site(paths, project, args.target)
+    files = sum(1 for f in out.rglob('*') if f.is_file())
+    print(f'Built the {args.target} website in {_rel(paths, out)}/ ({files} files).')
+    if warnings:
+        print(f'{len(warnings)} MkDocs warning(s); the first few:')
+        for message in warnings[:5]:
+            print(f'  {message}')
+    next_steps = {
+        'local': f'open {_rel(paths, out)}/index.html in your browser, or preview with: py run.py site --serve. '
+                 'To put it online, see docs/08-website.md',
+        'github_pages': 'this build contains no PDFs. To put it online, run the "Publish website (GitHub Pages)" '
+                        "workflow from your repository's Actions tab (docs/08-website.md)",
+        'openequella': 'py run.py publish openequella --content-repo <folder of your byui-oeq content repository>',
+    }
+    print(f'Next step: {next_steps[args.target]}')
+
+
+def cmd_publish(args, paths: Paths) -> None:
+    if args.target == 'github_pages':
+        print('GitHub Pages publishes from GitHub itself, without PDFs: commit and push your repository, then open '
+              'its Actions tab, choose "Publish website (GitHub Pages)", and click "Run workflow". '
+              'One-time setup is in docs/08-website.md.')
+        return
+    if not args.content_repo:
+        raise PipelineError('Give the folder of your byui-oeq content repository: '
+                            'py run.py publish openequella --content-repo <folder>  (see docs/08-website.md)')
+    out = publish.sync_openequella(paths, load_project(paths.root), args.content_repo)
+    for note in out['notes']:
+        print(f'  Note: {note}')
+    if out['committed']:
+        print(f"Copied {out['files']} files into {out['repo']} and committed them there (nothing was pushed).")
+        push = f'git -C "{out["repo"]}" push'
+        print(f'Next step: when you are ready for openEQUELLA to update, run: {push}')
+    else:
+        print(f"The content repository already matches the website ({out['files']} files); nothing to commit.")
+
+
+def cmd_demo(args, paths: Paths) -> None:
+    workspace = Path.cwd() / 'demo-workspace'
+    if args.fill_validation:
+        filled = demo.fill_validation(Paths(workspace))
+        print(f"Typed the demo's human tiers into {filled} rows of demo-workspace/data/validation.xlsx.")
+        print('Next step: py run.py --root demo-workspace validate --score')
+        return
+    demo.install_demo(workspace, force=args.force)
+    root = '--root demo-workspace'
+    print('The demo review is installed in demo-workspace/. Try each stage (your own review is not touched):')
+    for step in (f'py run.py {root} import',
+                 f'py run.py {root} prescreen',
+                 f'py run.py {root} classify --save demo-workspace/demo/decisions.json --tool Demo --model reference-decisions',
+                 f'py run.py {root} validate --draw',
+                 'py run.py demo --fill-validation',
+                 f'py run.py {root} validate --score',
+                 f'py run.py {root} report',
+                 f'py run.py {root} wiki --scaffold',
+                 f'py run.py {root} site'):
+        print(f'  {step}')
+    print('What each step shows: demo-workspace/demo/README.md')
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -243,6 +357,19 @@ def build_parser() -> argparse.ArgumentParser:
     wg.add_argument('--index', action='store_true', help='rebuild wiki/index.md')
     sub.add_parser('figures', help='draw frequency charts into wiki/figures/').set_defaults(func=cmd_figures)
     sub.add_parser('graph', help='build the interactive knowledge graph').set_defaults(func=cmd_graph)
+    s = sub.add_parser('site', help='build the wiki into a website')
+    s.set_defaults(func=cmd_site)
+    s.add_argument('--target', choices=site.TARGETS, default='local',
+                   help='local (with PDFs), github_pages (public, no PDFs), or openequella (BYU-I sign-in)')
+    s.add_argument('--serve', action='store_true', help='preview locally with live reload instead of building')
+    d = sub.add_parser('demo', help='install the demo review in demo-workspace/')
+    d.set_defaults(func=cmd_demo)
+    d.add_argument('--force', action='store_true', help='start the demo over')
+    d.add_argument('--fill-validation', action='store_true', help="type the demo's human tiers into the validation sample")
+    pub = sub.add_parser('publish', help='publish the website (openEQUELLA sync, or GitHub Pages instructions)')
+    pub.set_defaults(func=cmd_publish)
+    pub.add_argument('target', choices=['openequella', 'github_pages'])
+    pub.add_argument('--content-repo', help='openequella: folder of your cloned byui-oeq content repository')
     return parser
 
 
@@ -259,6 +386,9 @@ def main(argv: list[str] | None = None) -> int:
     except PipelineError as err:
         print(f'\nStopped: {err}', file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        print('\nStopped (Ctrl+C). Saved work is kept; run the command again to carry on.', file=sys.stderr)
+        return 130
     return 0
 
 

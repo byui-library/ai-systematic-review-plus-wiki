@@ -46,3 +46,12 @@ def test_summarize_playbook_covers_both_depths_and_unreadable():
 def test_appraisal_playbook_points_to_the_checklist():
     text = (PROMPTS / '05-quality-appraisal.md').read_text(encoding='utf-8')
     assert 'wiki/methods-review/appraisal-checklist.md' in text and 'overall' in text
+
+
+def test_setup_interview_covers_every_project_section():
+    import yaml
+    text = (PROMPTS / '01-setup-interview.md').read_text(encoding='utf-8')
+    assert 'one question at a time' in text and 'project.yaml' in text and 'py run.py check-config' in text
+    example = yaml.safe_load((PROMPTS.parent / 'project.example.yaml').read_text(encoding='utf-8'))
+    for section in example:
+        assert f'`{section}' in text, section
