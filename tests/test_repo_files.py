@@ -77,3 +77,16 @@ def test_slash_commands_point_at_real_playbooks_and_commands():
             assert (ROOT / playbook).exists(), (command.name, playbook)
         for line in re.findall(r'py run\.py ([^`\n]+)', text):
             build_parser().parse_args(shlex.split(line))
+
+
+def test_setup_scripts():
+    requirements = (ROOT / 'setup/requirements.txt').read_text(encoding='utf-8')
+    for package in ('mkdocs', 'mkdocs-material', 'pymupdf', 'openpyxl', 'pyyaml'):
+        assert package in requirements, package
+    for script in ('install-windows.bat', 'install-mac.sh'):
+        text = (ROOT / 'setup' / script).read_text(encoding='utf-8')
+        assert '.env.example' in text and 'run.py status' in text and '3, 11' in text, script
+    import shutil
+    bash = shutil.which('bash')
+    if bash:
+        assert subprocess.run([bash, '-n', str(ROOT / 'setup/install-mac.sh')]).returncode == 0
