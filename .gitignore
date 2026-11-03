@@ -12,6 +12,7 @@ data/
 demo-workspace/
 site/
 *.pdf
+*.pdf.part
 ~$*.xlsx
 
 # Maintainer-only notes

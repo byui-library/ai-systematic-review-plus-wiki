@@ -153,8 +153,11 @@ def cmd_wiki(args, paths: Paths) -> None:
         if out['done']:
             print('The wiki is complete. Next steps: py run.py wiki --tables, py run.py figures, py run.py graph, '
                   'then ask your AI assistant to "write the concept and debate pages" (prompts/04-concepts-debates.md)')
+        elif out['by_status'].get('stub'):
+            print(f"{out['by_status']['stub']} page(s) still to write. Next step: ask your AI assistant to "
+                  '"summarise the next paper" (it follows prompts/03-summarize-papers.md)')
         else:
-            print(f"Not finished yet. Next step: {state.NEXT['wiki']}")
+            print('Waiting for the researcher to confirm the deep-tier drafts listed above.')
     elif args.tables:
         for path in tables.build_tables(paths, project):
             print(f'  wrote {_rel(paths, path)}')
