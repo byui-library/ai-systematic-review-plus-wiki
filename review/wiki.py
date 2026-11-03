@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import urllib.parse
 from collections import Counter
 from datetime import date
@@ -21,10 +22,12 @@ from .errors import PipelineError
 from .io import read_json, write_json
 from .papers import Paper, included_papers
 from .pdfs import is_pdf
-from .pdftext import pdf_text
+from .pdftext import looks_scanned, page_count, read_pages
 from .prompt import prompt_fingerprint
 
 FILL = '<!-- fill'
+PART_CHARS = 60_000   # roughly one sitting of reading for the agent; parts break between pages
+MAX_PAGES = 400
 STATUSES = ('stub', 'draft', 'confirmed', 'unreadable')
 _FRONT = re.compile(r'\A---\n(.*?)\n---\n?', re.S)
 _DIRS = ('debates', 'tables', 'figures', 'sub-reviews', 'methods-review', 'raw/inbox')
@@ -305,15 +308,16 @@ def next_paper(paths: Paths, project: Project) -> dict | None:
         return None
     paper = stubs[0]
     pdf = paths.wiki / paper.pdf_rel
-    text = pdf_text(pdf, max_pages=30, max_chars=80_000) if is_pdf(pdf) else ''
+    pages = read_pages(pdf, max_pages=MAX_PAGES) if is_pdf(pdf) else None
+    full_text = _hand_out_full_text(paths, pdf, pages)
     tool = checklist(project.appraisal_tool)
     task = {
         'id': paper.id,
         'page': f'wiki/{paper.page_rel}',
         'depth': _depth(paper, project),
-        'pdf': f'wiki/{paper.pdf_rel}' if text else None,
-        'source': 'pdf' if text else 'abstract',
-        'text': text or paper.get('abstract'),
+        'pdf': f'wiki/{paper.pdf_rel}' if full_text['source'] == 'pdf' else None,
+        **full_text,
+        'text': full_text['text'] if full_text['source'] == 'pdf' else paper.get('abstract'),
         'metadata': {k: paper.get(k) for k in ('title', 'authors', 'year', 'journal', 'doi', 'keywords')},
         'extraction_columns': project.extraction_columns,
         'appraisal_tool': project.appraisal_tool,
@@ -323,6 +327,38 @@ def next_paper(paths: Paths, project: Project) -> dict | None:
     }
     write_json(paths.wiki_task, task)
     return task
+
+
+def _hand_out_full_text(paths: Paths, pdf: Path, pages: list | None) -> dict:
+    """Write the whole paper to part files (never cut off), and describe them for the agent."""
+    if paths.wiki_parts.exists():
+        shutil.rmtree(paths.wiki_parts)
+    if not pages or looks_scanned(pages):
+        scanned = bool(pages)
+        return {'source': 'abstract', 'parts': [], 'pages': len(pages or []), 'complete': False, 'tables': 0,
+                'scanned': scanned,
+                'note': ('The PDF is a scanned image with no text layer, so it cannot be read. Work from the abstract '
+                         'and say so; the researcher can add a text layer (OCR) and run wiki --next-paper again.')
+                if scanned else 'No readable PDF yet; work from the abstract.'}
+    paths.wiki_parts.mkdir(parents=True)
+    groups, current = [], []
+    for page in pages:   # parts break between pages, never inside one
+        if current and sum(len(p.render()) for p in current) + len(page.render()) > PART_CHARS:
+            groups.append(current)
+            current = []
+        current.append(page)
+    groups.append(current)
+    parts = []
+    for n, group in enumerate(groups, 1):
+        target = paths.wiki_parts / f'part-{n:02d}.txt'
+        target.write_text(''.join(p.render() for p in group), encoding='utf-8')
+        parts.append({'file': target.relative_to(paths.root).as_posix(),
+                      'pages': f'{group[0].number}-{group[-1].number}', 'characters': target.stat().st_size})
+    total_pages = page_count(pdf)
+    return {'source': 'pdf', 'parts': parts, 'pages': total_pages, 'complete': len(pages) == total_pages,
+            'tables': sum(len(p.tables) for p in pages), 'scanned': False,
+            'text': (paths.root / parts[0]['file']).read_text(encoding='utf-8') if len(parts) == 1 else None,
+            'note': '' if len(parts) == 1 else f'Long paper: read all {len(parts)} part files in order; nothing is cut.'}
 
 
 # ── check ─────────────────────────────────────────────────────────────────────

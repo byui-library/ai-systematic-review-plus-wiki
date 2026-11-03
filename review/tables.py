@@ -1,10 +1,14 @@
 """Extraction and appraisal tables, built only from paper pages' front-matter."""
 from __future__ import annotations
 
+import csv
 from pathlib import Path
+
+from openpyxl import Workbook
 
 from .appraisal import checklist
 from .config import Paths, Project
+from .excel import excel_safe, save_workbook, sheet_name, write_table
 from .papers import Paper, included_papers, surname
 from .vault_text import markdown_table
 from .wiki import as_answer, read_meta, write_text
@@ -22,11 +26,46 @@ def _meta(paths: Paths, paper: Paper) -> dict:
     return read_meta(paths.wiki / paper.page_rel) or {}   # a page with broken front-matter shows as pending
 
 
+def _plain(value):
+    value = as_answer(value)
+    return '; '.join(str(v) for v in value) if isinstance(value, list) else value
+
+
+def export_extraction(paths: Paths, project: Project, papers: list[Paper], metas: dict) -> list[Path]:
+    """data/extraction.xlsx (All + one sheet per included tier) and data/extraction.csv, for analysis."""
+    columns = [c['name'] for c in project.extraction_columns]
+    keys = ['tier', 'number', 'study', 'title', 'year', 'doi', 'status'] + [f'x:{c}' for c in columns] + ['overall']
+    titles = ['Tier', '#', 'Study', 'Title', 'Year', 'DOI', 'Status'] + columns + ['Appraisal overall']
+    rows = []
+    for p in papers:
+        meta = metas[p.id]
+        status = meta.get('status') or 'stub'
+        extraction = (meta.get('extraction') or {}) if status != 'stub' else {}
+        row = {'tier': p.tier, 'number': p.number, 'study': f"{surname(p.get('authors')).replace('-', ' ').title()} {p.year}",
+               'title': p.get('title'), 'year': p.year, 'doi': p.get('doi'), 'status': status,
+               'overall': _plain((meta.get('appraisal') or {}).get('overall')) if status != 'stub' else None}
+        row.update({f'x:{c}': _plain(extraction.get(c)) for c in columns})
+        rows.append(row)
+    widths = [6, 5, 22, 50, 6, 26, 10] + [24] * len(columns) + [12]
+    spec = list(zip(keys, titles, widths))
+    wb = Workbook()
+    write_table(wb.active, spec, rows)
+    wb.active.title = 'All'
+    for tier in (t for t in project.tiers if t.included):
+        write_table(wb.create_sheet(sheet_name(f'T{tier.id} {tier.label}')), spec, [r for r in rows if r['tier'] == tier.id])
+    save_workbook(wb, paths.extraction_xlsx)
+    with open(paths.extraction_csv, 'w', encoding='utf-8-sig', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(titles)
+        writer.writerows([excel_safe(r[k]) if r[k] is not None else '' for k in keys] for r in rows)
+    return [paths.extraction_xlsx, paths.extraction_csv]
+
+
 def build_tables(paths: Paths, project: Project) -> list[Path]:
     papers = included_papers(paths, project)
     metas = {p.id: _meta(paths, p) for p in papers}
     columns = [c['name'] for c in project.extraction_columns]
-    written = []
+    written = export_extraction(paths, project, papers, metas)
     for tier in [t for t in project.tiers if t.included]:
         rows = []
         for p in (p for p in papers if p.tier == tier.id):

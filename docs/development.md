@@ -67,8 +67,8 @@ Commands: `status`, `check-config`, `import`, `prescreen`, `classify --next-batc
 | `excel.py` | `excel_safe`, `write_table`, `write_pairs`, `save_workbook`. Every workbook goes through these |
 | `env.py` | `load_env`: reads `.env` (LibKey, Unpaywall); the process environment wins |
 | `papers.py` | `included_papers`: included tiers with **stable** per-tier numbers (`data/paper_numbers.json`, never reused), slugs, PDF names, page paths |
-| `pdftext.py` / `pdfs.py` | PDF text (PyMuPDF) and DOI detection; download via LibKey then Unpaywall, then a manual list; `match_dropped` for files saved in `wiki/raw/inbox/`. All network access goes through `pdfs.fetch_json` and `pdfs.fetch_pdf` (monkeypatched in tests) |
-| `wiki.py` | Page I/O (YAML front-matter), `scaffold`, `next_paper` (writes `data/wiki_paper.json`), `check`, `build_index`, `append_log` |
+| `pdftext.py` / `pdfs.py` | PDF text (PyMuPDF): `read_pages` returns every page's text plus its tables as Markdown, and `looks_scanned` flags image-only PDFs; DOI detection; download via LibKey then Unpaywall, then a manual list; `match_dropped` for files saved in `wiki/raw/inbox/`. All network access goes through `pdfs.fetch_json` and `pdfs.fetch_pdf` (monkeypatched in tests) |
+| `wiki.py` | Page I/O (YAML front-matter), `scaffold`, `next_paper` (writes `data/wiki_paper.json` and the whole paper as page-bounded parts in `data/wiki_paper/`; never truncates), `check`, `build_index`, `append_log` |
 | `vault_text.py` / `appraisal.py` | Text of generated pages; built-in AXIS, JBI, CASP, and RoB 2 checklists |
 | `tables.py` / `figures.py` / `graph.py` | Extraction and appraisal tables, charts, and the vis-network knowledge graph, all built from page front-matter and `[[links]]` |
 | `site.py` / `mkdocs_hooks.py` | Generated `mkdocs.yml` and MkDocs build for the local, github_pages (never any PDFs), and openequella targets; the hook converts `[[links]]` and swaps PDF links for publisher links on public builds |
