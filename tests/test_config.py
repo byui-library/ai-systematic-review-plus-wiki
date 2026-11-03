@@ -90,3 +90,35 @@ def test_wrong_shapes_and_blank_terms_are_problems(workspace):
     text = '\n'.join(err.value.problems)
     assert 'classify should be a section' in text and 'sources should be a list' in text
     assert "keyword group 'sport' terms must be a list" in text
+
+
+def test_known_sources_match_parsers():
+    from review.config import KNOWN_SOURCES
+    from review.importers import PARSERS
+    assert set(KNOWN_SOURCES) == set(PARSERS)
+
+
+def test_numeric_settings_are_validated_and_normalised(workspace):
+    def change(d):
+        d['classify'] = {'batch_size': '5.0'}
+        d['tiers'][1]['id'] = '2'
+    _edit(workspace, change)
+    project = load_project(workspace.root)
+    assert project.batch_size == 5 and project.raw['tiers'][1]['id'] == 2
+
+    def bad(d):
+        d['prescreen']['threshold'] = '1.5'
+        d['validation'] = {'min_per_tier': 'abc', 'seed': '1e2'}
+    _edit(workspace, bad)
+    with pytest.raises(ConfigError) as err:
+        load_project(workspace.root)
+    text = '\n'.join(err.value.problems)
+    for field in ('prescreen.threshold', 'validation.min_per_tier', 'validation.seed'):
+        assert field in text
+
+
+def test_whole_number_is_strict():
+    from review.config import whole_number
+    assert [whole_number(v) for v in (3, 3.0, '3', ' 3.0 ', '-2')] == [3, 3, 3, 3, -2]
+    assert [whole_number(v) for v in (True, 2.5, '2.5', '1e2', '1_0', 'nan', 'inf', '', None)] == [None] * 9
+    assert whole_number('9007199254740993') == 9007199254740993

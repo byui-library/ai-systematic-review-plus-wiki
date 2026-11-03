@@ -87,7 +87,7 @@ def draw_sample(paths: Paths, project: Project, force: bool = False) -> dict:
     chosen, per_tier = [], {}
     for tier_id in sorted(by_tier):
         ids = sorted(by_tier[tier_id])
-        k = min(len(ids), max(int(v['min_per_tier']), math.ceil(len(ids) * float(v['sample_percent']) / 100)))
+        k = min(len(ids), max(v['min_per_tier'], math.ceil(len(ids) * float(v['sample_percent']) / 100)))
         chosen.extend(rng.sample(ids, k))
         per_tier[tier_id] = k
     rng.shuffle(chosen)
@@ -95,6 +95,7 @@ def draw_sample(paths: Paths, project: Project, force: bool = False) -> dict:
                                          'ai_tiers': {i: ckpt[i]['tier'] for i in chosen}})
     by_id = {c['id']: c for c in cands}
     _write_sample_workbook(paths, project, [by_id[i] for i in chosen])
+    state.clear_from(paths, 'validate')   # a new sample makes earlier agreement statistics out of date
     return {'sampled': len(chosen), 'per_tier': per_tier}
 
 

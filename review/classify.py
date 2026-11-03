@@ -76,7 +76,9 @@ def _items(data) -> list | None:
     return None
 
 
-def _item_errors(r: dict, pid: str, candidate_ids: set[str], seen: set[str], tier_ids: set[int]) -> list[str]:
+def _check_item(r: dict, pid: str, candidate_ids: set[str], seen: set[str],
+                tier_ids: set[int]) -> tuple[list[str], int | None, int | None]:
+    """Returns (errors, tier, score) with tier and score parsed once."""
     errors = []
     if not pid:
         errors.append('missing id')
@@ -95,7 +97,7 @@ def _item_errors(r: dict, pid: str, candidate_ids: set[str], seen: set[str], tie
         errors.append('score must be between 1 and 100')
     if not str(r.get('reason') or '').strip():
         errors.append('reason is empty')
-    return errors
+    return errors, tier, score
 
 
 def validate_results(items, candidate_ids: set[str], tier_ids: set[int]) -> tuple[list[dict], list[str]]:
@@ -107,12 +109,11 @@ def validate_results(items, candidate_ids: set[str], tier_ids: set[int]) -> tupl
             problems.append(f'result {n} is not an object')
             continue
         pid = str(r.get('id') or '').strip()
-        errors = _item_errors(r, pid, candidate_ids, seen, tier_ids)
+        errors, tier, score = _check_item(r, pid, candidate_ids, seen, tier_ids)
         if errors:
             problems += [f'result {n} (id {pid or "missing"}): {e}' for e in errors]
             continue
-        clean.append({'id': pid, 'tier': whole_number(r['tier']), 'score': whole_number(r['score']),
-                      'reason': str(r['reason']).strip()})
+        clean.append({'id': pid, 'tier': tier, 'score': score, 'reason': str(r['reason']).strip()})
         seen.add(pid)
     return clean, problems
 

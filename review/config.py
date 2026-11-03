@@ -2,15 +2,14 @@
 from __future__ import annotations
 
 import copy
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
 from .errors import PipelineError
-from .importers import PARSERS
-
-KNOWN_SOURCES = tuple(PARSERS)
+KNOWN_SOURCES = ('pubmed', 'wos', 'ebsco', 'ris', 'csv')   # must match importers.PARSERS (tested)
 APPRAISAL_TOOLS = ('AXIS', 'CASP', 'JBI', 'RoB2', 'none')
 HOSTING_TARGETS = ('local', 'github_pages', 'openequella')
 
@@ -109,7 +108,7 @@ class Project:
 
     @property
     def threshold(self) -> int:
-        return int(self.raw['prescreen']['threshold'])
+        return self.raw['prescreen']['threshold']
 
     @property
     def exclude(self) -> dict:
@@ -125,7 +124,7 @@ class Project:
 
     @property
     def batch_size(self) -> int:
-        return int(self.raw['classify']['batch_size'])
+        return self.raw['classify']['batch_size']
 
     @property
     def tier_ids(self) -> list[int]:
@@ -142,17 +141,18 @@ class Project:
         raise KeyError(tier_id)
 
 
+_WHOLE = re.compile(r'[+-]?[0-9]+(?:[.]0*)?')
+
+
 def whole_number(value) -> int | None:
     """A whole number from YAML, JSON, or an Excel cell; None for booleans, fractions, and non-numbers."""
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
         return value
-    if isinstance(value, str):
-        try:
-            value = float(value.strip())
-        except ValueError:
-            return None
+    if isinstance(value, str):   # digits only, optionally "2.0": no exponents, underscores, nan, or inf
+        text = value.strip()
+        return int(text.split('.')[0]) if _WHOLE.fullmatch(text) else None
     if isinstance(value, float) and value.is_integer():
         return int(value)
     return None
@@ -243,8 +243,13 @@ def _problems(raw: dict) -> list[str]:
     bad_targets = [t for t in raw['site'].get('targets') or [] if t not in HOSTING_TARGETS]
     if bad_targets:
         p.append(f'site.targets contains unknown entries {bad_targets}; choose from {list(HOSTING_TARGETS)}')
-    if not _at_least_one(raw['classify'].get('batch_size')):
-        p.append('classify.batch_size must be a whole number of 1 or more')
+    for label, value, minimum in (('classify.batch_size', raw['classify'].get('batch_size'), 1),
+                                  ('prescreen.threshold', raw['prescreen'].get('threshold'), 0),
+                                  ('validation.min_per_tier', raw['validation'].get('min_per_tier'), 0),
+                                  ('validation.seed', raw['validation'].get('seed'), None)):
+        n = whole_number(value)
+        if n is None or (minimum is not None and n < minimum):
+            p.append(f'{label} must be a whole number' + (f' of {minimum} or more' if minimum is not None else ''))
     pct = raw['validation'].get('sample_percent')
     if not isinstance(pct, (int, float)) or isinstance(pct, bool) or not 0 < pct <= 100:
         p.append('validation.sample_percent must be a number between 1 and 100')
@@ -271,15 +276,22 @@ def load_project(root: Path | str) -> Project:
     if problems:
         raise ConfigError(problems)
 
+    # Validated: store numbers as ints so every reader of `raw` sees the same values as Tier/KeywordGroup.
+    for section, key in (('classify', 'batch_size'), ('prescreen', 'threshold'),
+                         ('validation', 'min_per_tier'), ('validation', 'seed')):
+        raw[section][key] = whole_number(raw[section][key])
+    for t in raw['tiers']:
+        t['id'] = whole_number(t['id'])
+    for g in raw['prescreen']['keyword_groups']:
+        g['weight'] = whole_number(g.get('weight', 1))
+
     tiers = tuple(sorted(
-        (Tier(whole_number(t['id']), str(t['label']).strip(), bool(t.get('included', False)),
-              str(t['definition']).strip()) for t in raw['tiers']),
+        (Tier(t['id'], str(t['label']).strip(), bool(t.get('included', False)), str(t['definition']).strip())
+         for t in raw['tiers']),
         key=lambda t: t.id,
     ))
-    groups = tuple(
-        KeywordGroup(str(g['name']), whole_number(g.get('weight', 1)), tuple(_terms(g)))
-        for g in raw['prescreen']['keyword_groups']
-    )
+    groups = tuple(KeywordGroup(str(g['name']), g['weight'], tuple(_terms(g)))
+                   for g in raw['prescreen']['keyword_groups'])
     return Project(raw=raw, tiers=tiers, keyword_groups=groups)
 
 

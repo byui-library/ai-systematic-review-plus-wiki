@@ -70,3 +70,13 @@ def test_stale_validation_is_left_out_after_reclassifying(classified, tmp_path):
     classify.save_results(paths, project, redo, 'Claude Code', 'claude-opus-5-5')
     report.run_report(paths, project)
     assert 'Validation' not in load_workbook(paths.results_xlsx).sheetnames
+
+
+def test_redrawing_the_sample_hides_old_statistics(classified):
+    paths, project = classified
+    validate.draw_sample(paths, project)
+    fill_validation(paths, TIERS)
+    validate.score_sample(paths, project)
+    validate.draw_sample(paths, project, force=True)
+    report.run_report(paths, project)
+    assert 'Validation' not in load_workbook(paths.results_xlsx).sheetnames
