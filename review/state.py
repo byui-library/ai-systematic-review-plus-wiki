@@ -18,7 +18,7 @@ NEXT = {
                 'then py run.py validate --score',
     'report': 'py run.py report',
     'pdfs': 'py run.py pdfs',
-    'wiki': 'Ask your AI assistant to "build the wiki"',
+    'wiki': 'py run.py wiki --scaffold, then ask your AI assistant to "build the wiki" (it follows prompts/03-05)',
     'site': 'py run.py site',
     'publish': 'See docs/08-website.md',
 }
@@ -41,6 +41,13 @@ def is_current_decision(entry: dict | None, prompt_fp: str, paper: dict) -> bool
     """A saved decision counts while it was made with today's prompt and today's view of the paper."""
     return (isinstance(entry, dict) and 'tier' in entry and entry.get('prompt') == prompt_fp
             and entry.get('input') == paper_fingerprint(paper))
+
+
+def current_decisions(paths: Paths, prompt_fp: str) -> dict[str, dict]:
+    """Saved decisions that still count, keyed by candidate id (see is_current_decision)."""
+    ckpt = load_checkpoint(paths)
+    return {c['id']: ckpt[c['id']] for c in load_candidates(paths)
+            if is_current_decision(ckpt.get(c['id']), prompt_fp, c)}
 
 
 def classify_counts(paths: Paths, fingerprint: str) -> tuple[int, int] | None:

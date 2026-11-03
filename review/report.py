@@ -37,8 +37,7 @@ def collect(paths: Paths, project: Project) -> dict:
             raise PipelineError(f"Paper {c['id']} is in tier {entry['tier']}, which project.yaml no longer "
                                 'defines. Restore that tier or re-classify the paper.') from None
         rows.append({**c, 'tier': tier.id, 'tier_label': tier.label, 'included': tier.included,
-                     'score': entry['score'], 'reason': entry['reason'],
-                     'sources': ', '.join(c.get('sources', []))})
+                     'score': entry['score'], 'reason': entry['reason']})   # sources stay a list; writers join it
     rows.sort(key=lambda r: (r['tier'], -r['score'], r.get('title', '')))
     return {'included': [r for r in rows if r['included']],
             'excluded': [r for r in rows if not r['included']],

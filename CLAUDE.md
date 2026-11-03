@@ -26,6 +26,12 @@ It is generalized from the pipeline of an earlier sports-science systematic revi
 5. **No copyrighted PDFs in public outputs.** GitHub Pages builds exclude `raw/`. The demo contains metadata and abstracts only, anonymized.
 6. **Secrets go in `.env`** (LibKey, Unpaywall email) and never in `project.yaml` or git.
 
+## Wiki rules
+
+- Python owns the generated pages (`index.md`, `AGENTS.md`/`CLAUDE.md` in the vault, `tables/`, `concepts/<axis>/index.md`, the methods-review pages except `notes.md`) and rewrites them freely.
+- The agent owns paper pages once they are past `status: stub`, concept and debate pages, sub-reviews, and appends to `log.md`. Re-running the scaffold never overwrites them.
+- Only paper-page **front-matter** is parsed. Never derive data from prose.
+
 ## Development
 
 ```bash
@@ -39,10 +45,10 @@ py -3.13 -m venv .venv
 | Plan | Scope | Status |
 | --- | --- | --- |
 | [Plan 1](docs/superpowers/plans/2026-11-03-plan-1-core-screening.md) | import, prescreen, classify, validate, report | Done |
-| Plan 2 | PDFs, wiki scaffold, agent wiki passes, figures, knowledge graph | Not yet written |
+| [Plan 2](docs/superpowers/plans/2026-11-03-plan-2-pdfs-and-wiki.md) | PDFs, wiki scaffold, agent wiki passes, figures, knowledge graph | Done |
 | Plan 3 | MkDocs site, publishing targets, remaining playbooks, docs, setup scripts, demo | Not yet written |
 
-Commands available so far: `status`, `check-config`, `import`, `prescreen`, `classify --next-batch [N] | --save FILE --tool T --model M`, `validate --draw [--force] | --score`, `report`. Run `py run.py <command> -h` for options. Use `--root <folder>` to run against a project folder other than the repo root.
+Commands available so far: `status`, `check-config`, `import`, `prescreen`, `classify --next-batch [N] | --save FILE --tool T --model M`, `validate --draw [--force] | --score`, `report`, `pdfs [--match]`, `wiki --scaffold | --next-paper | --check | --tables | --index`, `figures`, `graph`. Run `py run.py <command> -h` for options. Use `--root <folder>` to run against a project folder other than the repo root.
 
 ### Module map (`review/`)
 
@@ -59,6 +65,12 @@ Commands available so far: `status`, `check-config`, `import`, `prescreen`, `cla
 | `report.py` | `Results.xlsx`, CSVs, opt-in PRISMA |
 | `state.py` | Shared loaders (`load_candidates`, `load_checkpoint`), stage tracking, and next-step text (classify completion is computed from the checkpoint) |
 | `excel.py` | `excel_safe`, `write_table`, `write_pairs`, `save_workbook`. Every workbook goes through these |
+| `env.py` | `load_env`: reads `.env` (LibKey, Unpaywall); the process environment wins |
+| `papers.py` | `included_papers`: included tiers with **stable** per-tier numbers (`data/paper_numbers.json`, never reused), slugs, PDF names, page paths |
+| `pdftext.py` / `pdfs.py` | PDF text (PyMuPDF) and DOI detection; download via LibKey then Unpaywall, then a manual list; `match_dropped` for files saved in `wiki/raw/inbox/`. All network access goes through `pdfs.fetch_json` and `pdfs.fetch_pdf` (monkeypatched in tests) |
+| `wiki.py` | Page I/O (YAML front-matter), `scaffold`, `next_paper` (writes `data/wiki_paper.json`), `check`, `build_index`, `append_log` |
+| `vault_text.py` / `appraisal.py` | Text of generated pages; built-in AXIS, JBI, CASP, and RoB 2 checklists |
+| `tables.py` / `figures.py` / `graph.py` | Extraction and appraisal tables, charts, and the vis-network knowledge graph, all built from page front-matter and `[[links]]` |
 
 Tests must pass on Windows and Ubuntu (CI: `.github/workflows/tests.yml`). Tests use synthetic exports from `tests/fixture_exports.py`; never commit real search data outside `examples/demo/`.
 
