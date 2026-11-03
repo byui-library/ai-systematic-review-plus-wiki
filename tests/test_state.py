@@ -4,7 +4,7 @@ from review import classify, state, stages
 from review.config import Paths, load_project
 from review.errors import PipelineError
 from review.io import write_json
-from review.prompt import prompt_fingerprint
+from review.prompt import paper_fingerprint, prompt_fingerprint
 
 
 def test_progression(workspace):
@@ -31,11 +31,13 @@ def test_classify_done_is_computed_from_checkpoint(workspace):
     state.mark_done(workspace, 'import')
     state.mark_done(workspace, 'prescreen')
     fp = prompt_fingerprint(load_project(workspace.root))
-    write_json(workspace.candidates, [{'id': 'a'}, {'id': 'b'}])
-    write_json(workspace.checkpoint, {'a': {'tier': 1, 'prompt': fp}})
+    a, b = {'id': 'a', 'title': 'A'}, {'id': 'b', 'title': 'B'}
+    write_json(workspace.candidates, [a, b])
+    decided = {p['id']: {'tier': 1, 'prompt': fp, 'input': paper_fingerprint(p)} for p in (a, b)}
+    write_json(workspace.checkpoint, {'a': decided['a']})
     assert state.next_stage(workspace) == 'classify'
     assert '1/2 classified' in state.status_text(workspace)
-    write_json(workspace.checkpoint, {'a': {'tier': 1, 'prompt': fp}, 'b': {'tier': 2, 'prompt': fp}})
+    write_json(workspace.checkpoint, decided)
     assert state.next_stage(workspace) == 'validate'
 
 

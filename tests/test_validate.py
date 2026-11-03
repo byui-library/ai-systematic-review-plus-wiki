@@ -1,7 +1,7 @@
 import pytest
 from openpyxl import load_workbook
 
-from review import report, state, validate
+from review import classify, report, state, validate
 from review.errors import PipelineError
 from review.io import read_json, write_json
 from tests.helpers import TIERS, fill_validation
@@ -66,12 +66,15 @@ def test_score_lists_blank_rows(classified):
     assert '4 row(s)' in str(err.value)
 
 
-def test_control_characters_do_not_break_the_workbook(classified):
-    paths, project = classified
+def test_control_characters_do_not_break_the_workbook(prescreened, tmp_path):
+    paths, project = prescreened
     cands = read_json(paths.candidates)
     cands[0]['abstract'] = 'Bad\x02 character\x1a here'
-    write_json(paths.candidates, cands)
-    assert validate.draw_sample(paths, project, force=True)['sampled'] == 4   # human workbook is kept, so --force
+    write_json(paths.candidates, cands)   # edit before classifying: a later edit would retire the decision
+    canned = tmp_path / 'canned.json'
+    write_json(canned, {pid: {'tier': t, 'score': 80, 'reason': 'r'} for pid, t in TIERS.items()})
+    classify.save_results(paths, project, canned, 'Claude Code', 'claude-opus-5-5')
+    assert validate.draw_sample(paths, project)['sampled'] == 4
 
 
 def test_renamed_column_gives_friendly_error(classified):

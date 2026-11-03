@@ -7,10 +7,8 @@ from pathlib import Path
 from . import state
 from .config import Paths, Project, whole_number
 from .errors import PipelineError
-from .io import now_iso, write_json
-from .prompt import build_prompt, prompt_fingerprint
-
-PAPER_FIELDS = ('id', 'title', 'abstract', 'year', 'journal', 'keywords', 'pub_types')
+from .io import now_iso, read_json, write_json
+from .prompt import build_prompt, paper_fingerprint, paper_view, prompt_fingerprint
 
 
 def _progress(cands: list[dict], ckpt: dict, project: Project) -> dict:
@@ -18,7 +16,7 @@ def _progress(cands: list[dict], ckpt: dict, project: Project) -> dict:
     fingerprint = prompt_fingerprint(project)
     for c in cands:
         entry = ckpt.get(c['id'])
-        if state.is_current_decision(entry, fingerprint):
+        if state.is_current_decision(entry, fingerprint, c):
             by_tier[entry['tier']] = by_tier.get(entry['tier'], 0) + 1
     done = sum(by_tier.values())
     return {'total': len(cands), 'classified': done, 'remaining': len(cands) - done, 'by_tier': by_tier}
@@ -35,11 +33,12 @@ def next_batch(paths: Paths, project: Project, size: int | None = None) -> dict:
     ckpt = state.load_checkpoint(paths)
     fingerprint = prompt_fingerprint(project)
     todo = [c for c in state.load_candidates(paths)
-            if not state.is_current_decision(ckpt.get(c['id']), fingerprint)]
-    papers = [{k: c.get(k) for k in PAPER_FIELDS} for c in todo[:size]]
+            if not state.is_current_decision(ckpt.get(c['id']), fingerprint, c)]
+    papers = [paper_view(c) for c in todo[:size]]
     batch = {
         'instructions': 'prompts/02-classify.md',
         'prompt': build_prompt(project),
+        'prompt_fingerprint': fingerprint,
         'remaining_after_this_batch': len(todo) - len(papers),
         'papers': papers,
     }
@@ -114,20 +113,29 @@ def save_results(paths: Paths, project: Project, results_file: Path | str, tool:
     except json.JSONDecodeError as exc:
         raise PipelineError(f'Results file is not valid JSON: {exc}') from exc
 
+    fingerprint = prompt_fingerprint(project)
+    batch = read_json(paths.classify_batch, {}) or {}
+    if batch.get('prompt_fingerprint', fingerprint) != fingerprint:
+        raise PipelineError('Nothing was saved: the screening criteria in project.yaml changed after this batch was '
+                            'handed out, so these decisions used the old criteria. Run: py run.py classify --next-batch')
+    shown = {p['id']: p for p in batch.get('papers', []) if isinstance(p, dict) and 'id' in p}
+
     cands = state.load_candidates(paths)
+    by_id = {c['id']: c for c in cands}
     clean, problems = validate_results(_items(data), {c['id'] for c in cands}, set(project.tier_ids))
     if problems:
         raise PipelineError('Nothing was saved. Fix these entries and save again:', problems)
 
     ckpt = state.load_checkpoint(paths)
     stamp, new, changed = now_iso(), 0, False
-    fingerprint = prompt_fingerprint(project)
     for r in clean:
+        # Record what the AI was actually shown; if the paper changed since, the decision is not current.
         entry = {'tier': r['tier'], 'score': r['score'], 'reason': r['reason'],
-                 'tool': tool, 'model': model, 'timestamp': stamp, 'prompt': fingerprint}
+                 'tool': tool, 'model': model, 'timestamp': stamp, 'prompt': fingerprint,
+                 'input': paper_fingerprint(shown.get(r['id'], by_id[r['id']]))}
         previous = ckpt.get(r['id'])
         if isinstance(previous, dict):
-            current = state.is_current_decision(previous, fingerprint)
+            current = state.is_current_decision(previous, fingerprint, by_id[r['id']])
             entry['history'] = previous.pop('history', []) + [previous]
             changed = True
             if not current:

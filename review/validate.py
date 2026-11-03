@@ -38,7 +38,7 @@ def cohen_kappa(a: list, b: list) -> float:
 def _classified(paths: Paths, project: Project) -> tuple[list[dict], dict]:
     cands, ckpt = state.load_candidates(paths), state.load_checkpoint(paths)
     fingerprint = prompt_fingerprint(project)
-    missing = sum(1 for c in cands if not state.is_current_decision(ckpt.get(c['id']), fingerprint))
+    missing = sum(1 for c in cands if not state.is_current_decision(ckpt.get(c['id']), fingerprint, c))
     if missing:
         raise PipelineError(f'Finish classifying first: {missing} candidate(s) have no tier yet.')
     return cands, ckpt
@@ -139,7 +139,8 @@ def draw_sample(paths: Paths, project: Project, force: bool = False) -> dict:
         per_tier[tier_id] = k
     rng.shuffle(chosen)
     by_id = {c['id']: c for c in cands}
-    sample = {'seed': v['seed'], 'ids': chosen, 'ai_tiers': {i: ckpt[i]['tier'] for i in chosen}}
+    sample = {'seed': v['seed'], 'ids': chosen, 'ai_tiers': {i: ckpt[i]['tier'] for i in chosen},
+              'prompt': prompt_fingerprint(project)}
     _save_sample(paths, project, [by_id[i] for i in chosen], sample)
     state.invalidate_validation(paths)
     return {'sampled': len(chosen), 'per_tier': per_tier}
@@ -149,6 +150,9 @@ def score_sample(paths: Paths, project: Project) -> dict:
     sample = read_json(paths.validation_sample)
     if sample is None or not paths.validation_xlsx.exists():
         raise PipelineError('No validation sample yet. Run: py run.py validate --draw')
+    if sample.get('prompt') != prompt_fingerprint(project):
+        raise PipelineError('The screening criteria changed after this sample was drawn, so it no longer matches the '
+                            'AI decisions. Finish re-classifying, then run: py run.py validate --draw --force')
     valid = set(project.tier_ids)
     human, problems = {}, []
     for pid, value in _human_entries(paths).items():
@@ -187,6 +191,7 @@ def score_sample(paths: Paths, project: Project) -> dict:
         'per_tier': per_tier,
         'disagreements': [{'id': i, 'ai_tier': a, 'human_tier': h} for i, a, h in zip(ids, ai, hu) if a != h],
         'scored_at': now_iso(),
+        'prompt': sample['prompt'],
     }
     write_json(paths.validation_results, results)
     write_disclosure(paths, project, results)
@@ -196,11 +201,14 @@ def score_sample(paths: Paths, project: Project) -> dict:
 
 
 def write_disclosure(paths: Paths, project: Project, results: dict) -> None:
-    current = {c['id'] for c in state.load_candidates(paths)}
     fingerprint = prompt_fingerprint(project)
-    entries = [e for pid, e in state.load_checkpoint(paths).items()
-               if pid in current and state.is_current_decision(e, fingerprint)]
-    decisions = entries + [h for e in entries for h in e.get('history', [])]
+    ckpt = state.load_checkpoint(paths)
+    entries = [ckpt[c['id']] for c in state.load_candidates(paths)
+               if state.is_current_decision(ckpt.get(c['id']), fingerprint, c)]
+    # The disclosure describes one fixed prompt, so decisions from retired prompt versions are left out.
+    decisions = entries + [h for e in entries for h in e.get('history', []) if h.get('prompt') == fingerprint]
+    if not decisions:
+        raise PipelineError('No current AI decisions to describe. Finish classifying first.')
     tools = sorted({f"{d['tool']} ({d['model']})" for d in decisions})
     dates = sorted(d['timestamp'][:10] for d in decisions)
     v = project.validation

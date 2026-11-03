@@ -53,7 +53,7 @@ Commands available so far: `status`, `check-config`, `import`, `prescreen`, `cla
 | `importers/` | One parser per export format plus `detect_format`; `import_exports` reads `data/exports/` |
 | `dedup.py` | DOI → PMID → title+year matching; stable ids; `sources[]` |
 | `screen.py` | Hard filters (`exclude` flags) and weighted keyword score (each group counts once) |
-| `prompt.py` | `build_prompt` (screening prompt from question, PICOS, tiers) and `prompt_fingerprint`. Every saved decision stores the fingerprint; a decision counts only while it matches, so re-running import or prescreen keeps AI work, and editing the question, PICOS, or tiers retires it |
+| `prompt.py` | `build_prompt` (question, PICOS, tiers, **and all decision rules**), `prompt_fingerprint`, `paper_fingerprint`. A saved decision counts only while both fingerprints match: re-running import or prescreen keeps AI work, while editing the criteria or getting new paper information (e.g. an abstract) retires it. Keep decision rules in the prompt, not in `prompts/02-classify.md`, or rule changes won't retire old decisions |
 | `classify.py` | Batch out, validated + audited save in (`tool`, `model`, `timestamp`, `history`) |
 | `validate.py` | Stratified blind sample → `validation.xlsx`, Cohen's kappa, draft AI disclosure |
 | `report.py` | `Results.xlsx`, CSVs, opt-in PRISMA |
