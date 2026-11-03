@@ -55,8 +55,16 @@ def _tables(page) -> list[str]:
     return markdown
 
 
-def read_pages(path: Path, max_pages: int = 400, tables: bool = True) -> list[PageText] | None:
-    """Every page's text (and its tables as Markdown), or None if the file is not a readable PDF."""
+@dataclass
+class Document:
+    pages: list[PageText]
+    total: int            # pages in the PDF (pages beyond max_pages are not read)
+    problem: str = ''     # '' or 'encrypted'
+
+
+def read_document(path: Path, max_pages: int = 400, tables: bool = True) -> Document | None:
+    """Every page's text and tables, read page by page so one damaged page doesn't lose the rest.
+    None if the file is not a PDF at all."""
     try:
         import pymupdf
     except ImportError as exc:
@@ -64,27 +72,36 @@ def read_pages(path: Path, max_pages: int = 400, tables: bool = True) -> list[Pa
                             '(or: python -m pip install pymupdf).') from exc
     try:
         with open(path, 'rb') as f:
-            if f.read(4) != b'%PDF':
+            if f.read(4) != b'%PDF':   # PyMuPDF would happily render an HTML login page as a "document"
                 return None
-        with pymupdf.open(path) as doc:
-            return [PageText(i + 1, doc[i].get_text(), _tables(doc[i]) if tables else [])
-                    for i in range(min(max_pages, doc.page_count))]
+        doc = pymupdf.open(path)
     except Exception:
         return None
+    with doc:
+        if doc.needs_pass:
+            return Document([], doc.page_count, 'encrypted')
+        pages = []
+        for i in range(min(max_pages, doc.page_count)):
+            try:
+                pages.append(PageText(i + 1, doc[i].get_text(), _tables(doc[i]) if tables else []))
+            except Exception:
+                pages.append(PageText(i + 1, '[This page could not be read from the PDF.]'))
+        return Document(pages, doc.page_count)
 
 
-def page_count(path: Path) -> int:
-    try:
-        import pymupdf
-        with pymupdf.open(path) as doc:
-            return doc.page_count
-    except Exception:
-        return 0
+def read_pages(path: Path, max_pages: int = 400, tables: bool = True) -> list[PageText] | None:
+    document = read_document(path, max_pages, tables)
+    return document.pages if document and not document.problem else None
+
+
+def blank_pages(pages: list[PageText]) -> int:
+    return sum(1 for p in pages if len(p.text.strip()) < 20)
 
 
 def looks_scanned(pages: list[PageText]) -> bool:
-    """Pages but (almost) no text layer: an image scan that needs OCR before it can be read."""
-    return bool(pages) and sum(len(p.text.strip()) for p in pages) < 20 * len(pages)
+    """Most pages have (almost) no text layer: an image scan. A text cover sheet or a per-page
+    'downloaded from' line, as databases add to scans, does not make it readable."""
+    return bool(pages) and blank_pages(pages) * 2 > len(pages)
 
 
 def find_dois(text: str) -> list[str]:

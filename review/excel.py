@@ -28,6 +28,30 @@ def excel_safe(value):
     return value
 
 
+def _looks_like_formula(value) -> bool:
+    """Text Excel would run as a formula: '=…', '+…', '@…', or '-' not followed by a number."""
+    if not isinstance(value, str) or not value:
+        return False
+    return value[0] in '=+@' or (value[0] == '-' and not value[1:2].replace('.', '').isdigit())
+
+
+def put(ws, row: int, column: int, value):
+    """Write one cell; text that looks like a formula is stored as text, never evaluated."""
+    value = excel_safe(value)
+    cell = ws.cell(row=row, column=column, value=value)
+    if _looks_like_formula(value):
+        cell.data_type = 's'
+    return cell
+
+
+def csv_safe(value) -> str:
+    """A CSV cell that Excel will show as text: formula-like values get a leading apostrophe."""
+    value = excel_safe(value)
+    if value is None:
+        return ''
+    return f"'{value}" if _looks_like_formula(value) else value
+
+
 def write_table(ws, columns: list[tuple[str, str, int]], rows: list[dict], freeze: str = 'A2') -> None:
     """Header row from (key, title, width) columns, then one cleaned, wrapped row per dict."""
     for col, (_, title, width) in enumerate(columns, 1):
@@ -36,7 +60,7 @@ def write_table(ws, columns: list[tuple[str, str, int]], rows: list[dict], freez
         ws.column_dimensions[cell.column_letter].width = width
     for r_i, row in enumerate(rows, 2):
         for col, (key, _, _) in enumerate(columns, 1):
-            ws.cell(row=r_i, column=col, value=excel_safe(row.get(key, ''))).alignment = WRAP
+            put(ws, r_i, col, row.get(key, '')).alignment = WRAP
     ws.freeze_panes = freeze
     if rows:
         ws.auto_filter.ref = f'A1:{ws.cell(row=len(rows) + 1, column=len(columns)).coordinate}'
@@ -45,8 +69,8 @@ def write_table(ws, columns: list[tuple[str, str, int]], rows: list[dict], freez
 def write_pairs(ws, rows: list[tuple]) -> None:
     """Two-column key/value sheet; the first row is a bold title."""
     for i, (key, value) in enumerate(rows, 1):
-        ws.cell(row=i, column=1, value=excel_safe(key))
-        ws.cell(row=i, column=2, value=excel_safe(value)).alignment = WRAP
+        put(ws, i, 1, key)
+        put(ws, i, 2, value).alignment = WRAP
     ws['A1'].font = Font(bold=True, size=14)
     ws.column_dimensions['A'].width = 48
     ws.column_dimensions['B'].width = 90

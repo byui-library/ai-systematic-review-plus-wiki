@@ -22,7 +22,7 @@ from .errors import PipelineError
 from .io import read_json, write_json
 from .papers import Paper, included_papers
 from .pdfs import is_pdf
-from .pdftext import looks_scanned, page_count, read_pages
+from .pdftext import blank_pages, looks_scanned, read_document
 from .prompt import prompt_fingerprint
 
 FILL = '<!-- fill'
@@ -301,15 +301,16 @@ def _status(paths: Paths, paper: Paper) -> str:
 
 
 def next_paper(paths: Paths, project: Project) -> dict | None:
-    """Write the next stub's details (with its full text) to data/wiki_paper.json for the agent."""
+    """Write the next stub's details (with its whole text) to data/wiki_paper.json for the agent."""
     stubs = [p for p in _ordered(included_papers(paths, project), project) if _status(paths, p) == 'stub']
+    if paths.wiki_parts.exists():
+        shutil.rmtree(paths.wiki_parts)   # never leave an earlier paper's full text lying around
     if not stubs:
         paths.wiki_task.unlink(missing_ok=True)
         return None
     paper = stubs[0]
     pdf = paths.wiki / paper.pdf_rel
-    pages = read_pages(pdf, max_pages=MAX_PAGES) if is_pdf(pdf) else None
-    full_text = _hand_out_full_text(paths, pdf, pages)
+    full_text = _hand_out_full_text(paths, read_document(pdf, max_pages=MAX_PAGES) if is_pdf(pdf) else None)
     tool = checklist(project.appraisal_tool)
     task = {
         'id': paper.id,
@@ -329,36 +330,51 @@ def next_paper(paths: Paths, project: Project) -> dict | None:
     return task
 
 
-def _hand_out_full_text(paths: Paths, pdf: Path, pages: list | None) -> dict:
-    """Write the whole paper to part files (never cut off), and describe them for the agent."""
-    if paths.wiki_parts.exists():
+def _from_abstract(note: str, scanned: bool = False, pages: int = 0) -> dict:
+    return {'source': 'abstract', 'parts': [], 'pages': pages, 'complete': None, 'tables': 0,
+            'scanned': scanned, 'text': None, 'note': note}
+
+
+def _hand_out_full_text(paths: Paths, document) -> dict:
+    """Write the whole paper to part files (never cut off) and describe them for the agent."""
+    if document is None:
+        return _from_abstract('No readable PDF yet; work from the abstract.')
+    if document.problem == 'encrypted':
+        return _from_abstract('The PDF is password-protected, so it cannot be read. Work from the abstract and ask the '
+                              'researcher to save an unprotected copy over it.', pages=document.total)
+    if looks_scanned(document.pages):
+        return _from_abstract('The PDF is a scanned image with no text layer, so it cannot be read. Work from the '
+                              'abstract and say so; the researcher can add a text layer (OCR) and run '
+                              'wiki --next-paper again.', scanned=True, pages=document.total)
+    if paths.wiki_parts.exists():   # never mix in parts left from another paper
         shutil.rmtree(paths.wiki_parts)
-    if not pages or looks_scanned(pages):
-        scanned = bool(pages)
-        return {'source': 'abstract', 'parts': [], 'pages': len(pages or []), 'complete': False, 'tables': 0,
-                'scanned': scanned,
-                'note': ('The PDF is a scanned image with no text layer, so it cannot be read. Work from the abstract '
-                         'and say so; the researcher can add a text layer (OCR) and run wiki --next-paper again.')
-                if scanned else 'No readable PDF yet; work from the abstract.'}
     paths.wiki_parts.mkdir(parents=True)
-    groups, current = [], []
-    for page in pages:   # parts break between pages, never inside one
-        if current and sum(len(p.render()) for p in current) + len(page.render()) > PART_CHARS:
+    groups, current, size = [], [], 0
+    for page in document.pages:   # parts break between pages, never inside one
+        rendered = page.render()
+        if current and size + len(rendered) > PART_CHARS:
             groups.append(current)
-            current = []
-        current.append(page)
+            current, size = [], 0
+        current.append((page, rendered))
+        size += len(rendered)
     groups.append(current)
-    parts = []
+    parts, texts = [], []
     for n, group in enumerate(groups, 1):
+        text = ''.join(rendered for _, rendered in group)
         target = paths.wiki_parts / f'part-{n:02d}.txt'
-        target.write_text(''.join(p.render() for p in group), encoding='utf-8')
+        target.write_text(text, encoding='utf-8')
+        texts.append(text)
         parts.append({'file': target.relative_to(paths.root).as_posix(),
-                      'pages': f'{group[0].number}-{group[-1].number}', 'characters': target.stat().st_size})
-    total_pages = page_count(pdf)
-    return {'source': 'pdf', 'parts': parts, 'pages': total_pages, 'complete': len(pages) == total_pages,
-            'tables': sum(len(p.tables) for p in pages), 'scanned': False,
-            'text': (paths.root / parts[0]['file']).read_text(encoding='utf-8') if len(parts) == 1 else None,
-            'note': '' if len(parts) == 1 else f'Long paper: read all {len(parts)} part files in order; nothing is cut.'}
+                      'pages': f'{group[0][0].number}-{group[-1][0].number}', 'characters': len(text)})
+    notes = [] if len(parts) == 1 else [f'Long paper: read all {len(parts)} part files in order; nothing is cut.']
+    blanks = blank_pages(document.pages)
+    if blanks:
+        notes.append(f'{blanks} page(s) have no text layer (images or scanned pages); tell the researcher if they '
+                     'seem to hold results.')
+    return {'source': 'pdf', 'parts': parts, 'pages': document.total,
+            'complete': len(document.pages) == document.total,
+            'tables': sum(len(p.tables) for p in document.pages), 'scanned': False,
+            'text': texts[0] if len(parts) == 1 else None, 'note': ' '.join(notes)}
 
 
 # ── check ─────────────────────────────────────────────────────────────────────

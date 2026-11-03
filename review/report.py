@@ -10,7 +10,7 @@ from openpyxl import Workbook
 from . import state
 from .config import Paths, Project
 from .errors import PipelineError
-from .excel import excel_safe, save_workbook, sheet_name, write_pairs, write_table
+from .excel import csv_safe, save_workbook, sheet_name, write_pairs, write_table
 from .io import read_json
 from .prompt import prompt_fingerprint
 
@@ -50,7 +50,7 @@ def write_csv(path, rows: list[dict]) -> None:
         writer = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore')
         writer.writeheader()
         for r in rows:
-            writer.writerow({k: excel_safe(r.get(k, '')) for k in fields})
+            writer.writerow({k: csv_safe(r.get(k, '')) for k in fields})
 
 
 def validation_rows(v: dict) -> list[tuple]:
