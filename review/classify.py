@@ -56,7 +56,9 @@ def progress(paths: Paths, project: Project) -> dict:
 
 
 def next_batch(paths: Paths, project: Project, size: int | None = None) -> dict:
-    size = size or project.batch_size
+    size = project.batch_size if size is None else size
+    if size < 1:
+        raise PipelineError('Batch size must be 1 or more.')
     ckpt = read_json(paths.checkpoint, {})
     todo = [c for c in _candidates(paths) if c['id'] not in ckpt]
     papers = [{k: c.get(k) for k in PAPER_FIELDS} for c in todo[:size]]
@@ -80,6 +82,19 @@ def _items(data) -> list | None:
     return None
 
 
+def _whole(value) -> int | None:
+    """A whole number, or None. Rejects booleans and fractional values instead of truncating them."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
 def validate_results(items, candidate_ids: set[str], tier_ids: set[int]) -> tuple[list[dict], list[str]]:
     if not isinstance(items, list) or not items:
         return [], ['No results found. Expected {"results": [{"id": ..., "tier": ..., "score": ..., "reason": ...}]}']
@@ -97,20 +112,16 @@ def validate_results(items, candidate_ids: set[str], tier_ids: set[int]) -> tupl
             problems.append(f'{where}: id is not a candidate; copy ids exactly from the batch')
         elif pid in seen:
             problems.append(f'{where}: listed twice')
-        try:
-            tier = int(r.get('tier'))
-            if tier not in tier_ids:
-                problems.append(f'{where}: tier {tier} is not one of {sorted(tier_ids)}')
-        except (TypeError, ValueError):
-            tier = None
-            problems.append(f'{where}: tier must be a number')
-        try:
-            score = int(r.get('score'))
-            if not 1 <= score <= 100:
-                problems.append(f'{where}: score must be between 1 and 100')
-        except (TypeError, ValueError):
-            score = None
-            problems.append(f'{where}: score must be a number')
+        tier = _whole(r.get('tier'))
+        if tier is None:
+            problems.append(f'{where}: tier must be a whole number')
+        elif tier not in tier_ids:
+            problems.append(f'{where}: tier {tier} is not one of {sorted(tier_ids)}')
+        score = _whole(r.get('score'))
+        if score is None:
+            problems.append(f'{where}: score must be a whole number')
+        elif not 1 <= score <= 100:
+            problems.append(f'{where}: score must be between 1 and 100')
         reason = str(r.get('reason') or '').strip()
         if not reason:
             problems.append(f'{where}: reason is empty')
@@ -137,17 +148,20 @@ def save_results(paths: Paths, project: Project, results_file: Path | str, tool:
         raise PipelineError('Nothing was saved. Fix these entries and save again:', problems)
 
     ckpt = read_json(paths.checkpoint, {})
-    stamp, new = now_iso(), 0
+    stamp, new, changed = now_iso(), 0, False
     for r in clean:
         entry = {'tier': r['tier'], 'score': r['score'], 'reason': r['reason'],
                  'tool': tool.strip(), 'model': model.strip(), 'timestamp': stamp}
         previous = ckpt.get(r['id'])
         if previous:
             entry['history'] = previous.pop('history', []) + [previous]
+            changed = True
         else:
             new += 1
         ckpt[r['id']] = entry
     write_json(paths.checkpoint, ckpt)
+    if changed:   # earlier decisions moved, so validation statistics and the report are out of date
+        state.clear_from(paths, 'validate')
 
     prog = progress(paths, project)
     if prog['remaining'] == 0:

@@ -38,3 +38,12 @@ def test_source_order_sets_priority(workspace):
     by_id = {r['id']: r for r in _run(workspace, ['wos', 'pubmed', 'ebsco', 'ris', 'csv'])[0]}
     assert by_id['doi:10.1000/example.001']['source'] == 'wos'
     assert by_id['doi:10.1000/example.001']['sources'] == ['wos', 'pubmed']
+
+
+def test_same_title_and_year_with_different_dois_stay_separate():
+    a = {'source': 'pubmed', 'doi': '10.1/a', 'pmid': '', 'source_id': '1', 'title': 'Response to letter', 'year': '2020'}
+    b = {**a, 'source': 'wos', 'doi': '10.1/b', 'source_id': '2'}
+    c = {**a, 'source': 'ebsco', 'doi': '', 'source_id': '3'}   # no DOI: still merges by title
+    unique, stats = deduplicate([a, b, c], ORDER)
+    assert [r['id'] for r in unique] == ['doi:10.1/a', 'doi:10.1/b']
+    assert unique[0]['sources'] == ['pubmed', 'ebsco']

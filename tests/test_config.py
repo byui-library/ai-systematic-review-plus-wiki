@@ -57,3 +57,23 @@ def test_paths_layout(tmp_path):
     paths = Paths(tmp_path)
     assert paths.exports == tmp_path.resolve() / 'data' / 'exports'
     assert paths.checkpoint.name == 'checkpoint.json'
+
+
+def test_empty_section_keeps_defaults(workspace):
+    workspace.project_yaml.write_text(
+        workspace.project_yaml.read_text(encoding='utf-8').replace(
+            'validation: {sample_percent: 10, min_per_tier: 5, seed: 42}', 'validation:\nappraisal:'),
+        encoding='utf-8')
+    project = load_project(workspace.root)
+    assert project.validation['seed'] == 42 and project.raw['appraisal']['tool'] == 'AXIS'
+
+
+def test_scalar_terms_and_bad_batch_size_are_problems(workspace):
+    def change(d):
+        d['prescreen']['keyword_groups'][0]['terms'] = 'gps'
+        d['classify'] = {'batch_size': 0}
+    _edit(workspace, change)
+    with pytest.raises(ConfigError) as err:
+        load_project(workspace.root)
+    text = '\n'.join(err.value.problems)
+    assert 'terms must be a list' in text and 'batch_size' in text

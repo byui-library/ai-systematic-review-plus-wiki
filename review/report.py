@@ -31,7 +31,7 @@ def sheet_name(text: str) -> str:
     return _BAD_SHEET_CHARS.sub('-', text).strip()[:31]
 
 
-def _cell(value):
+def excel_safe(value):
     if isinstance(value, list):
         value = '; '.join(str(v) for v in value)
     if isinstance(value, str):
@@ -70,7 +70,7 @@ def write_csv(path, rows: list[dict]) -> None:
         writer = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore')
         writer.writeheader()
         for r in rows:
-            writer.writerow({k: _cell(r.get(k, '')) for k in fields})
+            writer.writerow({k: excel_safe(r.get(k, '')) for k in fields})
 
 
 def _table(ws, columns, rows: list[dict]) -> None:
@@ -80,7 +80,7 @@ def _table(ws, columns, rows: list[dict]) -> None:
         ws.column_dimensions[cell.column_letter].width = width
     for r_i, row in enumerate(rows, 2):
         for col, (key, _, _) in enumerate(columns, 1):
-            ws.cell(row=r_i, column=col, value=_cell(row.get(key, ''))).alignment = WRAP
+            ws.cell(row=r_i, column=col, value=excel_safe(row.get(key, ''))).alignment = WRAP
     ws.freeze_panes = 'A2'
     if rows:
         ws.auto_filter.ref = f'A1:{ws.cell(row=len(rows) + 1, column=len(columns)).coordinate}'
@@ -89,7 +89,7 @@ def _table(ws, columns, rows: list[dict]) -> None:
 def _key_values(ws, rows: list[tuple]) -> None:
     for i, (k, v) in enumerate(rows, 1):
         ws.cell(row=i, column=1, value=k)
-        ws.cell(row=i, column=2, value=_cell(v)).alignment = WRAP
+        ws.cell(row=i, column=2, value=excel_safe(v)).alignment = WRAP
     ws['A1'].font = Font(bold=True, size=14)
     ws.column_dimensions['A'].width = 48
     ws.column_dimensions['B'].width = 90

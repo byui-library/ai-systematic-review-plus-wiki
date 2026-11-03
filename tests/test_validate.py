@@ -3,7 +3,7 @@ from openpyxl import load_workbook
 
 from review import state, validate
 from review.errors import PipelineError
-from review.io import read_json
+from review.io import read_json, write_json
 from tests.helpers import TIERS, fill_validation
 
 
@@ -64,3 +64,34 @@ def test_score_lists_blank_rows(classified):
     with pytest.raises(PipelineError) as err:
         validate.score_sample(paths, project)
     assert '4 row(s)' in str(err.value)
+
+
+def test_control_characters_do_not_break_the_workbook(classified):
+    paths, project = classified
+    cands = read_json(paths.candidates)
+    cands[0]['abstract'] = 'Bad\x02 character\x1a here'
+    write_json(paths.candidates, cands)
+    assert validate.draw_sample(paths, project)['sampled'] == 4
+
+
+def test_renamed_column_gives_friendly_error(classified):
+    paths, project = classified
+    validate.draw_sample(paths, project)
+    wb = load_workbook(paths.validation_xlsx)
+    wb['Screen these']['G1'] = 'My tier'
+    wb.save(paths.validation_xlsx)
+    with pytest.raises(PipelineError) as err:
+        validate.score_sample(paths, project)
+    assert "'Your tier'" in str(err.value) and '--force' in str(err.value)
+
+
+def test_disclosure_ignores_orphan_checkpoint_entries(classified):
+    paths, project = classified
+    ckpt = read_json(paths.checkpoint)
+    ckpt['doi:orphan'] = {**ckpt['doi:10.1000/example.001'], 'tool': 'Old Tool', 'model': 'old-1'}
+    write_json(paths.checkpoint, ckpt)
+    validate.draw_sample(paths, project)
+    fill_validation(paths, TIERS)
+    validate.score_sample(paths, project)
+    text = paths.ai_disclosure.read_text(encoding='utf-8')
+    assert 'Each of the 4 records' in text and 'Old Tool' not in text

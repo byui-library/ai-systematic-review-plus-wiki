@@ -20,8 +20,13 @@ def _norm_text(s: str) -> str:
 
 
 def title_key(title: str, year: str) -> str:
-    t = _norm_text(title)[:120]
+    t = _norm_text(title)
     return f'{t}|{year}' if t and year else ''
+
+
+def _conflict(a: dict, b: dict) -> bool:
+    """True when two records carry different DOIs or PMIDs, so a title match is a coincidence."""
+    return any(a.get(k) and b.get(k) and a[k] != b[k] for k in ('doi', 'pmid'))
 
 
 def _make_id(rec: dict, tkey: str) -> str:
@@ -52,8 +57,9 @@ def deduplicate(records: list[dict], source_order: list[str]) -> tuple[list[dict
         doi, pmid = r.get('doi', ''), r.get('pmid', '')
         tkey = title_key(r.get('title', ''), r.get('year', ''))
 
-        existing = (by_doi.get(doi) if doi else None) or (by_pmid.get(pmid) if pmid else None) \
-            or (by_title.get(tkey) if tkey else None)
+        existing = (by_doi.get(doi) if doi else None) or (by_pmid.get(pmid) if pmid else None)
+        if existing is None and tkey in by_title and not _conflict(by_title[tkey], r):
+            existing = by_title[tkey]
         if existing is not None:
             if src not in existing['sources']:
                 existing['sources'].append(src)
@@ -82,7 +88,7 @@ def deduplicate(records: list[dict], source_order: list[str]) -> tuple[list[dict
         if pmid:
             by_pmid[pmid] = rec
         if tkey:
-            by_title[tkey] = rec
+            by_title.setdefault(tkey, rec)
 
     stats = {
         'per_source_raw': {s: per_source_raw[s]

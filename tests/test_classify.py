@@ -88,3 +88,31 @@ def test_completing_classification_moves_to_validate(prescreened, tmp_path):
     out = classify.save_results(paths, project, _results(tmp_path, payload), TOOL, MODEL)
     assert out['remaining'] == 0 and out['by_tier'] == {1: 0, 2: 4, 3: 0, 4: 0}
     assert state.next_stage(paths) == 'validate'
+
+
+def test_booleans_and_fractions_are_rejected(prescreened, tmp_path):
+    paths, project = prescreened
+    ids = _ids(paths)
+    payload = {'results': [{'id': ids[0], 'tier': True, 'score': 90, 'reason': 'r'},
+                           {'id': ids[1], 'tier': 2, 'score': 99.9, 'reason': 'r'},
+                           {'id': ids[2], 'tier': 2.0, 'score': '70', 'reason': 'r'}]}
+    with pytest.raises(PipelineError) as err:
+        classify.save_results(paths, project, _results(tmp_path, payload), TOOL, MODEL)
+    assert len(err.value.problems) == 2   # 2.0 and '70' are whole numbers and allowed
+
+
+def test_negative_batch_size_is_refused(prescreened):
+    paths, project = prescreened
+    with pytest.raises(PipelineError):
+        classify.next_batch(paths, project, size=-3)
+
+
+def test_reclassifying_resets_validation(prescreened, tmp_path):
+    paths, project = prescreened
+    payload = {'results': [{'id': i, 'tier': 2, 'score': 50, 'reason': 'r'} for i in _ids(paths)]}
+    classify.save_results(paths, project, _results(tmp_path, payload), TOOL, MODEL)
+    state.mark_done(paths, 'validate')
+    state.mark_done(paths, 'report')
+    classify.save_results(paths, project, _results(tmp_path, {_ids(paths)[0]: {'tier': 1, 'score': 90, 'reason': 'r'}}),
+                          TOOL, MODEL)
+    assert state.next_stage(paths) == 'validate'

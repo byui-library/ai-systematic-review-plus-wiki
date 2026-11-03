@@ -145,6 +145,8 @@ class Project:
 def _merge(base: dict, override: dict) -> dict:
     out = copy.deepcopy(base)
     for key, value in (override or {}).items():
+        if value is None and key in out:   # `section:` with nothing under it keeps the defaults
+            continue
         if isinstance(value, dict) and isinstance(out.get(key), dict):
             out[key] = _merge(out[key], value)
         else:
@@ -176,8 +178,8 @@ def _problems(raw: dict) -> list[str]:
         weight = g.get('weight', 1)
         if not isinstance(weight, int) or isinstance(weight, bool) or weight < 1:
             p.append(f"keyword group '{g['name']}' weight must be a whole number of 1 or more")
-        if not g.get('terms'):
-            p.append(f"keyword group '{g['name']}' has no terms")
+        if not isinstance(g.get('terms'), list) or not g['terms']:
+            p.append(f"keyword group '{g['name']}' terms must be a list, for example: terms: [gps, accelerometer]")
 
     tiers = raw.get('tiers') or []
     if not 2 <= len(tiers) <= 6:
@@ -205,6 +207,9 @@ def _problems(raw: dict) -> list[str]:
     bad_targets = [t for t in raw['site'].get('targets') or [] if t not in HOSTING_TARGETS]
     if bad_targets:
         p.append(f'site.targets contains unknown entries {bad_targets}; choose from {list(HOSTING_TARGETS)}')
+    size = raw['classify'].get('batch_size')
+    if not isinstance(size, int) or isinstance(size, bool) or size < 1:
+        p.append('classify.batch_size must be a whole number of 1 or more')
     pct = raw['validation'].get('sample_percent')
     if not isinstance(pct, (int, float)) or isinstance(pct, bool) or not 0 < pct <= 100:
         p.append('validation.sample_percent must be a number between 1 and 100')
