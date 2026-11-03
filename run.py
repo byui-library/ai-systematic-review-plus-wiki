@@ -27,7 +27,8 @@ def _use_project_venv() -> None:
 if __name__ == '__main__':
     _use_project_venv()
 
-from review import classify, figures, graph, pdfs, report, site, stages, state, tables, validate, wiki  # noqa: E402
+from review import (classify, figures, graph, pdfs, publish, report, site, stages, state,  # noqa: E402
+                    tables, validate, wiki)
 from review.config import Paths, load_project, summary  # noqa: E402
 from review.errors import PipelineError  # noqa: E402
 
@@ -250,6 +251,26 @@ def cmd_site(args, paths: Paths) -> None:
     print(f'Next step: {next_steps[args.target]}')
 
 
+def cmd_publish(args, paths: Paths) -> None:
+    if args.target == 'github_pages':
+        print('GitHub Pages publishes from GitHub itself, without PDFs: commit and push your repository, then open '
+              'its Actions tab, choose "Publish website (GitHub Pages)", and click "Run workflow". '
+              'One-time setup is in docs/08-website.md.')
+        return
+    if not args.content_repo:
+        raise PipelineError('Give the folder of your byui-oeq content repository: '
+                            'py run.py publish openequella --content-repo <folder>  (see docs/08-website.md)')
+    out = publish.sync_openequella(paths, load_project(paths.root), args.content_repo)
+    for note in out['notes']:
+        print(f'  Note: {note}')
+    if out['committed']:
+        print(f"Copied {out['files']} files into {out['repo']} and committed them there (nothing was pushed).")
+        push = f'git -C "{out["repo"]}" push'
+        print(f'Next step: when you are ready for openEQUELLA to update, run: {push}')
+    else:
+        print(f"The content repository already matches the website ({out['files']} files); nothing to commit.")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='run.py', description='AI-assisted systematic review pipeline.')
     parser.add_argument('--root', default=str(Path(__file__).resolve().parent),
@@ -292,6 +313,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument('--target', choices=site.TARGETS, default='local',
                    help='local (with PDFs), github_pages (public, no PDFs), or openequella (BYU-I sign-in)')
     s.add_argument('--serve', action='store_true', help='preview locally with live reload instead of building')
+    pub = sub.add_parser('publish', help='publish the website (openEQUELLA sync, or GitHub Pages instructions)')
+    pub.set_defaults(func=cmd_publish)
+    pub.add_argument('target', choices=['openequella', 'github_pages'])
+    pub.add_argument('--content-repo', help='openequella: folder of your cloned byui-oeq content repository')
     return parser
 
 
