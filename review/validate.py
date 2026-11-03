@@ -81,40 +81,30 @@ def _write_sample_workbook(paths: Paths, project: Project, papers: list[dict], o
 
 
 def _save_sample(paths: Paths, project: Project, papers: list[dict], sample: dict) -> None:
+    """Replace the workbook and its sample metadata together: either both change or neither does."""
     paths.data.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=paths.data) as temp_dir:
-        temp_dir = Path(temp_dir)
-        staged_xlsx = temp_dir / paths.validation_xlsx.name
-        staged_sample = temp_dir / paths.validation_sample.name
-        backups = {}
+    with tempfile.TemporaryDirectory(dir=paths.data) as tmp:
+        new_xlsx, new_json, old_xlsx = Path(tmp) / 'new.xlsx', Path(tmp) / 'new.json', Path(tmp) / 'old.xlsx'
+        _write_sample_workbook(paths, project, papers, new_xlsx)
+        write_json(new_json, sample)
+        had_workbook = paths.validation_xlsx.exists()
         try:
-            _write_sample_workbook(paths, project, papers, staged_xlsx)
-            write_json(staged_sample, sample)
-            for dest in (paths.validation_xlsx, paths.validation_sample):
-                if dest.exists():
-                    backup = temp_dir / f'{dest.name}.backup'
-                    shutil.copy2(dest, backup)
-                    backups[dest] = backup
-
-            replaced = []
+            if had_workbook:
+                shutil.copy2(paths.validation_xlsx, old_xlsx)
+            os.replace(new_xlsx, paths.validation_xlsx)          # fails here if the workbook is open in Excel
             try:
-                os.replace(staged_xlsx, paths.validation_xlsx)
-                replaced.append(paths.validation_xlsx)
-                os.replace(staged_sample, paths.validation_sample)
-                replaced.append(paths.validation_sample)
+                os.replace(new_json, paths.validation_sample)    # a failed replace leaves the old metadata intact
             except OSError:
-                for dest in reversed(replaced):
-                    if dest in backups:
-                        os.replace(backups[dest], dest)
-                    else:
-                        dest.unlink(missing_ok=True)
+                if had_workbook:
+                    os.replace(old_xlsx, paths.validation_xlsx)
+                else:
+                    paths.validation_xlsx.unlink(missing_ok=True)
                 raise
         except PermissionError as exc:
-            raise PipelineError(
-                f'Could not write {paths.validation_xlsx.name}. If it is open in Excel, close it and run again.'
-            ) from exc
+            raise PipelineError(f'Could not write {paths.validation_xlsx.name}. If it is open in Excel, close it '
+                                'and run again.') from exc
         except OSError as exc:
-            raise PipelineError(f'Could not safely update the validation workbook and sample metadata: {exc}') from exc
+            raise PipelineError(f'Could not update the validation workbook and its sample metadata: {exc}') from exc
 
 
 def draw_sample(paths: Paths, project: Project, force: bool = False) -> dict:
