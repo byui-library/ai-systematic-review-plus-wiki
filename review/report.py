@@ -12,6 +12,7 @@ from .config import Paths, Project
 from .errors import PipelineError
 from .excel import excel_safe, save_workbook, sheet_name, write_pairs, write_table
 from .io import read_json
+from .prompt import prompt_fingerprint
 
 COLUMNS = [
     ('id', 'ID', 24), ('tier', 'Tier', 6), ('tier_label', 'Tier label', 16), ('score', 'Score', 7),
@@ -23,10 +24,11 @@ COLUMNS = [
 
 def collect(paths: Paths, project: Project) -> dict:
     ckpt = state.load_checkpoint(paths)
+    fingerprint = prompt_fingerprint(project)
     rows, unclassified = [], 0
     for c in state.load_candidates(paths):
         entry = ckpt.get(c['id'])
-        if entry is None:
+        if not state.is_current_decision(entry, fingerprint):
             unclassified += 1
             continue
         try:

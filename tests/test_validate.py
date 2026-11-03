@@ -71,7 +71,7 @@ def test_control_characters_do_not_break_the_workbook(classified):
     cands = read_json(paths.candidates)
     cands[0]['abstract'] = 'Bad\x02 character\x1a here'
     write_json(paths.candidates, cands)
-    assert validate.draw_sample(paths, project)['sampled'] == 4
+    assert validate.draw_sample(paths, project, force=True)['sampled'] == 4   # human workbook is kept, so --force
 
 
 def test_renamed_column_gives_friendly_error(classified):
@@ -187,7 +187,7 @@ def test_zero_candidates_skip_validation_and_continue_to_report(prescreened):
     assert not paths.validation_xlsx.exists()
 
 
-def test_prescreen_invalidates_old_decisions_and_outputs(classified):
+def test_prescreen_clears_outputs_but_keeps_decisions(classified):
     paths, project = classified
     validate.draw_sample(paths, project)
     fill_validation(paths, TIERS)
@@ -197,8 +197,7 @@ def test_prescreen_invalidates_old_decisions_and_outputs(classified):
     stages.run_prescreen(paths, project)
     assert not state.is_done(paths, 'validate') and not state.is_done(paths, 'report')
     assert not paths.validation_sample.exists() and not paths.validation_results.exists()
-    assert all(entry['stale'] for entry in state.load_checkpoint(paths).values())
-    with pytest.raises(PipelineError) as err:
-        validate._classified(paths)
-    assert 'no tier yet' in str(err.value)
-    assert state.classify_counts(paths) == (0, 4)
+    from review.prompt import prompt_fingerprint
+    assert state.classify_counts(paths, prompt_fingerprint(project)) == (4, 4)
+    assert state.next_stage(paths) == 'validate'
+    assert validate.draw_sample(paths, project, force=True)['sampled'] == 4   # human workbook is kept, so --force
