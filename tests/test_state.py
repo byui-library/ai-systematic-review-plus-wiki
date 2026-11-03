@@ -1,9 +1,10 @@
 import pytest
 
 from review import classify, state, stages
-from review.config import Paths
+from review.config import Paths, load_project
 from review.errors import PipelineError
 from review.io import write_json
+from review.prompt import prompt_fingerprint
 
 
 def test_progression(workspace):
@@ -29,11 +30,12 @@ def test_clear_from_resets_later_stages(workspace):
 def test_classify_done_is_computed_from_checkpoint(workspace):
     state.mark_done(workspace, 'import')
     state.mark_done(workspace, 'prescreen')
+    fp = prompt_fingerprint(load_project(workspace.root))
     write_json(workspace.candidates, [{'id': 'a'}, {'id': 'b'}])
-    write_json(workspace.checkpoint, {'a': {'tier': 1}})
+    write_json(workspace.checkpoint, {'a': {'tier': 1, 'prompt': fp}})
     assert state.next_stage(workspace) == 'classify'
     assert '1/2 classified' in state.status_text(workspace)
-    write_json(workspace.checkpoint, {'a': {'tier': 1}, 'b': {'tier': 2}})
+    write_json(workspace.checkpoint, {'a': {'tier': 1, 'prompt': fp}, 'b': {'tier': 2, 'prompt': fp}})
     assert state.next_stage(workspace) == 'validate'
 
 
@@ -42,8 +44,33 @@ def test_import_invalidates_candidates_but_preserves_audit_and_human_work(classi
     paths.validation_xlsx.write_bytes(b'human work')
     stages.run_import(paths, project)
     assert not paths.candidates.exists()
-    assert state.classify_counts(paths) is None
-    assert all(entry['stale'] for entry in state.load_checkpoint(paths).values())
+    fp = prompt_fingerprint(project)
+    assert state.classify_counts(paths, fp) is None
     assert paths.validation_xlsx.read_bytes() == b'human work'
     with pytest.raises(PipelineError):
         classify.next_batch(paths, project)
+    # Re-running prescreen restores the same candidates, and every earlier AI decision still counts.
+    stages.run_prescreen(paths, project)
+    assert state.classify_counts(paths, fp) == (4, 4)
+    assert classify.next_batch(paths, project)['papers'] == []
+    assert state.next_stage(paths) == 'validate'
+
+
+def test_changing_the_screening_prompt_retires_old_decisions(classified, tmp_path):
+    import yaml
+    paths, project = classified
+    data = yaml.safe_load(paths.project_yaml.read_text(encoding='utf-8'))
+    data['tiers'][0]['definition'] = 'Metric structure analysis is the only aim.'
+    paths.project_yaml.write_text(yaml.safe_dump(data), encoding='utf-8')
+    edited = load_project(paths.root)
+    assert prompt_fingerprint(edited) != prompt_fingerprint(project)
+    assert state.classify_counts(paths, prompt_fingerprint(edited)) == (0, 4)
+    assert len(classify.next_batch(paths, edited)['papers']) == 4
+    assert state.next_stage(paths) == 'classify'
+    # Re-classifying under the new prompt counts as new work and keeps the old decision in history.
+    redo = tmp_path / 'redo.json'
+    pid = 'doi:10.1000/example.001'
+    redo.write_text('{"%s": {"tier": 1, "score": 90, "reason": "Still central."}}' % pid, encoding='utf-8')
+    out = classify.save_results(paths, edited, redo, 'Claude Code', 'claude-opus-5-5')
+    assert out['new'] == 1 and out['classified'] == 1
+    assert state.load_checkpoint(paths)[pid]['history'][0]['prompt'] == prompt_fingerprint(project)

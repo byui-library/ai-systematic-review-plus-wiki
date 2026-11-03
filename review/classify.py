@@ -8,38 +8,17 @@ from . import state
 from .config import Paths, Project, whole_number
 from .errors import PipelineError
 from .io import now_iso, write_json
+from .prompt import build_prompt, prompt_fingerprint
 
 PAPER_FIELDS = ('id', 'title', 'abstract', 'year', 'journal', 'keywords', 'pub_types')
 
 
-def build_prompt(project: Project) -> str:
-    picos = '\n'.join(f"  {k.replace('_', ' ').title():<26}: {v}"
-                      for k, v in project.picos.items() if str(v or '').strip())
-    tiers = '\n\n'.join(
-        f"TIER {t.id} — {t.label.upper()} ({'INCLUDED' if t.included else 'EXCLUDED'}):\n  {t.definition}"
-        for t in project.tiers)
-    ids = ', '.join(str(i) for i in project.tier_ids)
-    choices = '|'.join(str(i) for i in project.tier_ids)
-    return (
-        'You are a research librarian screening papers for a systematic review.\n'
-        'Apply the research question, PICOS criteria, and tier definitions below exactly.\n\n'
-        f'RESEARCH QUESTION:\n  {project.question}\n\n'
-        f'PICOS CRITERIA:\n{picos}\n\n'
-        f'TIERS:\n\n{tiers}\n\n'
-        f'For every paper choose exactly one tier ({ids}), a relevance score from 1 to 100 within that\n'
-        'tier (100 = textbook example, 50 = typical member, 1 = barely qualifies), and one concise\n'
-        'sentence explaining the decision.\n\n'
-        'Respond with JSON only:\n'
-        f'{{"results": [{{"id": "<paper id>", "tier": <{choices}>, "score": <1-100>, '
-        '"reason": "<one sentence>"}]}\n'
-    )
-
-
 def _progress(cands: list[dict], ckpt: dict, project: Project) -> dict:
     by_tier = {t: 0 for t in project.tier_ids}
+    fingerprint = prompt_fingerprint(project)
     for c in cands:
         entry = ckpt.get(c['id'])
-        if state.is_current_decision(entry):
+        if state.is_current_decision(entry, fingerprint):
             by_tier[entry['tier']] = by_tier.get(entry['tier'], 0) + 1
     done = sum(by_tier.values())
     return {'total': len(cands), 'classified': done, 'remaining': len(cands) - done, 'by_tier': by_tier}
@@ -54,7 +33,9 @@ def next_batch(paths: Paths, project: Project, size: int | None = None) -> dict:
     if size < 1:
         raise PipelineError('Batch size must be 1 or more.')
     ckpt = state.load_checkpoint(paths)
-    todo = [c for c in state.load_candidates(paths) if not state.is_current_decision(ckpt.get(c['id']))]
+    fingerprint = prompt_fingerprint(project)
+    todo = [c for c in state.load_candidates(paths)
+            if not state.is_current_decision(ckpt.get(c['id']), fingerprint)]
     papers = [{k: c.get(k) for k in PAPER_FIELDS} for c in todo[:size]]
     batch = {
         'instructions': 'prompts/02-classify.md',
@@ -140,12 +121,13 @@ def save_results(paths: Paths, project: Project, results_file: Path | str, tool:
 
     ckpt = state.load_checkpoint(paths)
     stamp, new, changed = now_iso(), 0, False
+    fingerprint = prompt_fingerprint(project)
     for r in clean:
         entry = {'tier': r['tier'], 'score': r['score'], 'reason': r['reason'],
-                 'tool': tool, 'model': model, 'timestamp': stamp}
+                 'tool': tool, 'model': model, 'timestamp': stamp, 'prompt': fingerprint}
         previous = ckpt.get(r['id'])
         if isinstance(previous, dict):
-            current = state.is_current_decision(previous)
+            current = state.is_current_decision(previous, fingerprint)
             entry['history'] = previous.pop('history', []) + [previous]
             changed = True
             if not current:

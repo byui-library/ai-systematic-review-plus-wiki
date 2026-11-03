@@ -4,6 +4,7 @@ from __future__ import annotations
 from .config import ConfigError, Paths, load_project
 from .errors import PipelineError
 from .io import now_iso, read_json, write_json
+from .prompt import prompt_fingerprint
 
 STAGES = ('setup', 'import', 'prescreen', 'classify', 'validate', 'report', 'pdfs', 'wiki', 'site', 'publish')
 
@@ -36,17 +37,18 @@ def load_checkpoint(paths: Paths) -> dict:
     return read_json(paths.checkpoint, {})
 
 
-def is_current_decision(entry: dict | None) -> bool:
-    return isinstance(entry, dict) and 'tier' in entry and not entry.get('stale')
+def is_current_decision(entry: dict | None, fingerprint: str) -> bool:
+    """A saved decision counts while it was made with today's screening prompt (see prompt.py)."""
+    return isinstance(entry, dict) and 'tier' in entry and entry.get('prompt') == fingerprint
 
 
-def classify_counts(paths: Paths) -> tuple[int, int] | None:
+def classify_counts(paths: Paths, fingerprint: str) -> tuple[int, int] | None:
     """(classified, total) for the current candidates, or None before prescreen."""
     candidates = load_candidates(paths, required=False)
     if candidates is None:
         return None
     ckpt = load_checkpoint(paths)
-    return sum(1 for c in candidates if is_current_decision(ckpt.get(c['id']))), len(candidates)
+    return sum(1 for c in candidates if is_current_decision(ckpt.get(c['id']), fingerprint)), len(candidates)
 
 
 # ── Stage tracking ────────────────────────────────────────────────────────────
@@ -80,14 +82,9 @@ def _remove_generated_outputs(paths: Paths) -> None:
 
 
 def invalidate_screening(paths: Paths, stage: str) -> None:
-    """Invalidate decisions and generated outputs while retaining audit and human workbook data."""
+    """Clear outputs built from the old candidate list. AI decisions are kept: each one judges a single
+    paper against the screening prompt, which import and prescreen do not change."""
     clear_from(paths, stage)
-    if paths.checkpoint.exists():
-        checkpoint = load_checkpoint(paths)
-        for entry in checkpoint.values():
-            if isinstance(entry, dict) and 'tier' in entry:
-                entry['stale'] = True
-        write_json(paths.checkpoint, checkpoint)
     if stage == 'import':
         for path in (paths.candidates, paths.prefilter_excluded, paths.prescreen_excluded):
             path.unlink(missing_ok=True)
@@ -108,19 +105,14 @@ def invalidate_report(paths: Paths) -> None:
         path.unlink(missing_ok=True)
 
 
-def setup_problems(paths: Paths) -> list[str]:
-    try:
-        load_project(paths.root)
-        return []
-    except ConfigError as err:
-        return err.problems
-
-
 def _snapshot(paths: Paths) -> tuple[dict[str, bool], tuple[int, int] | None, list[str]]:
     """Read every input once: (done per stage, classify counts, setup problems)."""
     completed = load_state(paths)['completed']
-    problems = setup_problems(paths)
-    counts = classify_counts(paths) if 'prescreen' in completed else None
+    try:
+        fingerprint, problems = prompt_fingerprint(load_project(paths.root)), []
+    except ConfigError as err:
+        fingerprint, problems = None, err.problems
+    counts = classify_counts(paths, fingerprint) if fingerprint and 'prescreen' in completed else None
     done = {stage: stage in completed for stage in STAGES}
     done['setup'] = not problems
     done['classify'] = counts is not None and counts[0] == counts[1]

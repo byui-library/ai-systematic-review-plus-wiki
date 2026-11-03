@@ -16,6 +16,7 @@ from .config import Paths, Project, whole_number
 from .errors import PipelineError
 from .excel import save_workbook, write_table
 from .io import now_iso, read_json, write_json
+from .prompt import prompt_fingerprint
 
 SHEET = 'Screen these'
 ID_COL = 'ID'
@@ -34,9 +35,10 @@ def cohen_kappa(a: list, b: list) -> float:
     return 1.0 if pe == 1 else (po - pe) / (1 - pe)
 
 
-def _classified(paths: Paths) -> tuple[list[dict], dict]:
+def _classified(paths: Paths, project: Project) -> tuple[list[dict], dict]:
     cands, ckpt = state.load_candidates(paths), state.load_checkpoint(paths)
-    missing = sum(1 for c in cands if not state.is_current_decision(ckpt.get(c['id'])))
+    fingerprint = prompt_fingerprint(project)
+    missing = sum(1 for c in cands if not state.is_current_decision(ckpt.get(c['id']), fingerprint))
     if missing:
         raise PipelineError(f'Finish classifying first: {missing} candidate(s) have no tier yet.')
     return cands, ckpt
@@ -116,7 +118,7 @@ def _save_sample(paths: Paths, project: Project, papers: list[dict], sample: dic
 
 
 def draw_sample(paths: Paths, project: Project, force: bool = False) -> dict:
-    cands, ckpt = _classified(paths)
+    cands, ckpt = _classified(paths, project)
     if not cands:
         state.invalidate_validation(paths, remove_sample=True)
         state.mark_done(paths, 'validate', not_applicable=True)
@@ -195,8 +197,9 @@ def score_sample(paths: Paths, project: Project) -> dict:
 
 def write_disclosure(paths: Paths, project: Project, results: dict) -> None:
     current = {c['id'] for c in state.load_candidates(paths)}
+    fingerprint = prompt_fingerprint(project)
     entries = [e for pid, e in state.load_checkpoint(paths).items()
-               if pid in current and state.is_current_decision(e)]
+               if pid in current and state.is_current_decision(e, fingerprint)]
     decisions = entries + [h for e in entries for h in e.get('history', [])]
     tools = sorted({f"{d['tool']} ({d['model']})" for d in decisions})
     dates = sorted(d['timestamp'][:10] for d in decisions)
