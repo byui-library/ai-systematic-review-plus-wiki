@@ -34,3 +34,21 @@ def test_run_py_works_from_the_command_line(tmp_path):
     out = subprocess.run([sys.executable, str(ROOT / 'run.py'), '--root', str(tmp_path), 'status'],
                          capture_output=True, text=True, encoding='utf-8')
     assert out.returncode == 0 and 'Review pipeline status' in out.stdout
+
+
+def test_pages_workflow_is_manual_and_pdf_free():
+    import yaml
+    workflow = yaml.safe_load((ROOT / '.github/workflows/pages.yml').read_text(encoding='utf-8'))
+    triggers = workflow.get('on', workflow.get(True))   # YAML 1.1 reads a bare `on` key as True
+    assert list(triggers) == ['workflow_dispatch']
+    steps = [s for job in workflow['jobs'].values() for s in job['steps']]
+    assert any('run.py site --target github_pages' in s.get('run', '') for s in steps)
+    assert any(s.get('uses', '').startswith('actions/upload-pages-artifact') and
+               s['with']['path'] == 'site-github_pages' for s in steps)
+    assert any(s.get('uses', '').startswith('actions/deploy-pages') for s in steps)
+
+
+def test_ci_covers_the_oldest_supported_python():
+    import yaml
+    tests = yaml.safe_load((ROOT / '.github/workflows/tests.yml').read_text(encoding='utf-8'))
+    assert '3.11' in tests['jobs']['test']['strategy']['matrix']['python-version']
