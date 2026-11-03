@@ -163,11 +163,16 @@ def match_dropped(paths: Paths, project: Project) -> dict:
     """Move PDFs the researcher saved anywhere under wiki/raw/ to their expected names."""
     papers = included_papers(paths, project)
     expected = {(paths.wiki / p.pdf_rel).resolve() for p in papers}
-    drops = sorted(f for f in paths.raw.rglob('*.pdf') if f.resolve() not in expected) if paths.raw.exists() else []
+    drops = sorted(f for f in paths.raw.rglob('*')
+                   if f.is_file() and f.suffix.lower() == '.pdf' and f.resolve() not in expected) \
+        if paths.raw.exists() else []
     log = read_json(paths.pdf_log, {})
     out: dict[str, list] = {'matched': [], 'duplicates': [], 'unmatched': []}
     for drop in drops:
         rel = drop.relative_to(paths.wiki).as_posix()
+        if not is_pdf(drop):
+            out['unmatched'].append(rel)
+            continue
         paper = _identify(drop, papers)
         if paper is None:
             out['unmatched'].append(rel)

@@ -235,6 +235,24 @@ def test_drop_matched_by_title_in_filename(after_failed_download):
     assert [m['id'] for m in out['matched']] == [KIM]
 
 
+def test_case_insensitive_pdf_extension_is_matched(after_failed_download):
+    paths, project, papers = after_failed_download
+    make_pdf(paths.inbox / 'download.PDF', papers[DOE].get('title'))
+    out = pdfs.match_dropped(paths, project)
+    assert [m['id'] for m in out['matched']] == [DOE]
+
+
+def test_invalid_title_named_pdf_is_left_unmatched(after_failed_download):
+    paths, project, papers = after_failed_download
+    paths.inbox.mkdir(parents=True, exist_ok=True)
+    invalid = paths.inbox / f'{papers[DOE].get("title")}.pdf'
+    invalid.write_text('<html>download failed</html>', encoding='utf-8')
+    out = pdfs.match_dropped(paths, project)
+    assert out['matched'] == []
+    assert out['unmatched'] == ['raw/inbox/' + invalid.name]
+    assert invalid.exists()
+
+
 def test_unmatched_and_duplicate_drops_are_left_alone(after_failed_download):
     paths, project, papers = after_failed_download
     make_pdf(paths.wiki / papers[DOE].pdf_rel, 'already in place 10.1000/example.001')

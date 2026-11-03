@@ -68,10 +68,11 @@ def build_graph(paths: Paths) -> dict:
     data = {
         'nodes': [{'id': n, 'label': titles[n][:40], 'title': titles[n],
                    'group': n.split('/')[0] if '/' in n else 'home', 'value': 1 + degree[n],
-                   'url': f'../{n}.html', 'color': COLOURS.get(n.split('/')[0], '#757575')}
+                   'url': f'../{n}.md', 'color': COLOURS.get(n.split('/')[0], '#757575')}
                   for n in sorted(nodes)],
         'edges': [{'from': a, 'to': b} for a, b in sorted(edges)],
     }
+    graph_json = json.dumps(data, ensure_ascii=False).replace('<', '\\u003c')
     html = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -89,7 +90,7 @@ def build_graph(paths: Paths) -> dict:
 <div id="legend">Node size = number of links. Drag to explore; double-click a node to open its page.</div>
 <div id="graph"></div>
 <script>
-const GRAPH = {json.dumps(data, ensure_ascii=False)};
+const GRAPH = {graph_json};
 const network = new vis.Network(document.getElementById('graph'),
   {{ nodes: new vis.DataSet(GRAPH.nodes), edges: new vis.DataSet(GRAPH.edges) }},
   {{ nodes: {{ shape: 'dot', scaling: {{ min: 6, max: 30 }}, font: {{ size: 12 }} }},

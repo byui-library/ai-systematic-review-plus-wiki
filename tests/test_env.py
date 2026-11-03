@@ -24,6 +24,12 @@ def test_process_environment_wins(workspace, monkeypatch):
     assert load_env(workspace)['UNPAYWALL_EMAIL'] == 'shell@example.edu'
 
 
+def test_empty_process_environment_overrides_file(workspace, monkeypatch):
+    workspace.env.write_text('UNPAYWALL_EMAIL=file@example.edu\n', encoding='utf-8')
+    monkeypatch.setenv('UNPAYWALL_EMAIL', '')
+    assert load_env(workspace)['UNPAYWALL_EMAIL'] == ''
+
+
 def test_missing_env_file(workspace, monkeypatch):
     monkeypatch.delenv('LIBKEY_LIBRARY_ID', raising=False)
     assert 'LIBKEY_LIBRARY_ID' not in load_env(workspace)

@@ -196,6 +196,27 @@ def test_check_reports_problems_and_marks_done(classified):
     assert not wiki.check(paths, project)['done'] and not state.is_done(paths, 'wiki')
 
 
+def test_check_requires_reappraisal_after_tool_change(classified):
+    paths, project = classified
+    wiki.scaffold(paths, project)
+    papers = _papers(paths, project)
+    _fill(paths, papers['doi:10.1000/example.001'], 'confirmed')
+    _fill(paths, papers['doi:10.1000/example.005'], 'draft')
+    data = yaml.safe_load(paths.project_yaml.read_text(encoding='utf-8'))
+    data.setdefault('appraisal', {})['tool'] = 'CASP'
+    paths.project_yaml.write_text(yaml.safe_dump(data), encoding='utf-8')
+    changed_project = load_project(paths.root)
+    problems = '\n'.join(wiki.check(paths, changed_project)['problems'])
+    assert "appraisal tool 'AXIS' does not match configured tool 'CASP'; reappraise this page" in problems
+
+
+def test_empty_included_paper_set_completes_wiki_stage(classified, monkeypatch):
+    paths, project = classified
+    monkeypatch.setattr(wiki, 'included_papers', lambda *args: [])
+    out = wiki.check(paths, project)
+    assert out['done'] and out['total'] == 0 and out['problems'] == []
+
+
 def test_check_flags_broken_pages(classified):
     paths, project = classified
     wiki.scaffold(paths, project)

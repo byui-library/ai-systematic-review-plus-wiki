@@ -3,7 +3,7 @@ import http.client
 
 import yaml
 
-from review import figures, pdfs, tables, wiki
+from review import appraisal, figures, pdfs, tables, wiki
 from review.config import load_project
 from review.errors import PipelineError
 from review.io import read_json
@@ -42,6 +42,11 @@ def test_bare_yes_no_appraisal_answers_are_accepted(classified):
     assert '| no |' in text and 'True' not in text and 'False' not in text
     checklist_page = (paths.wiki / 'methods-review/appraisal-checklist.md').read_text(encoding='utf-8')
     assert "q1: 'yes'" in checklist_page
+
+
+def test_axis_note_marks_q13_as_reverse_polarity():
+    note = appraisal.checklist('AXIS')['note']
+    assert 'q13' in note and 'q19' in note
 
 
 def test_sources_stay_a_list(classified):

@@ -6,7 +6,8 @@ CHECKLISTS: dict[str, dict] = {
         'name': 'AXIS: appraisal tool for cross-sectional studies (Downes et al., 2016, BMJ Open)',
         'answers': ['yes', 'no', 'unclear'],
         'overall': ['high', 'moderate', 'low'],
-        'note': 'For q19 (funding or conflicts of interest), "yes" signals a concern; for every other item "yes" is favourable.',
+        'note': 'For q13 (response rate and non-response bias) and q19 (funding or conflicts of interest), "yes" signals '
+                'a concern; for every other item "yes" is favourable.',
         'items': [
             ('q1', 'Were the aims or objectives of the study clear?'),
             ('q2', 'Was the study design appropriate for the stated aims?'),

@@ -22,7 +22,7 @@
 4. Fill the page:
    - In the front-matter (between the `---` lines), set every `extraction` value. Write `NR` when the paper does not report it. Separate several values with `; `, for example `PCA; factor analysis`.
    - Replace every `<!-- fill … -->` marker in the text.
-   - Leave the appraisal for playbook 05, unless the researcher asked you to do both together.
+   - If appraisal is configured, complete it now using playbook 05; `wiki --check` validates appraisal values too.
    - End every factual claim with `(source: <pdf filename>)` or `(source: abstract)`.
 5. Append a log entry to `wiki/log.md`, using the format in `wiki/AGENTS.md`.
 6. Run `py run.py wiki --check`. Fix any problem it reports for the page you just wrote, then go back to step 1.

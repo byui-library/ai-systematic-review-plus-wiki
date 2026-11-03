@@ -346,6 +346,9 @@ def _page_problems(meta: dict, body: str, paper: Paper, project: Project) -> lis
         tool = checklist(project.appraisal_tool)
         if tool:
             appraisal = meta.get('appraisal') if isinstance(meta.get('appraisal'), dict) else {}
+            if appraisal.get('tool') != project.appraisal_tool:
+                problems.append(f"appraisal tool '{appraisal.get('tool')}' does not match configured tool "
+                                f"'{project.appraisal_tool}'; reappraise this page")
             items = appraisal.get('items') if isinstance(appraisal.get('items'), dict) else {}
             allowed = [a.lower() for a in tool['answers']]
             for key, _ in tool['items']:
@@ -380,7 +383,7 @@ def check(paths: Paths, project: Project) -> dict:
             unreadable.append(paper.page_rel)
         if status == 'draft' and paper.tier in project.deep_tiers:
             awaiting.append(paper.page_rel)
-    done = bool(papers) and not problems and not awaiting and by_status.get('stub', 0) == 0
+    done = not problems and not awaiting and by_status.get('stub', 0) == 0
     if done:
         state.mark_done(paths, 'wiki', papers=len(papers))
     else:

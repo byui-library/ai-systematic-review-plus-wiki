@@ -24,6 +24,6 @@ def load_env(paths: Paths) -> dict[str, str]:
                 value = value[1:-1]
             values[m.group(1)] = value
     for key in set(values) | set(KNOWN_KEYS):
-        if os.environ.get(key):
+        if key in os.environ:
             values[key] = os.environ[key]
     return values
