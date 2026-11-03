@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import math
+import os
 import random
+import shutil
+import tempfile
 from collections import defaultdict
+from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
 
@@ -32,7 +36,7 @@ def cohen_kappa(a: list, b: list) -> float:
 
 def _classified(paths: Paths) -> tuple[list[dict], dict]:
     cands, ckpt = state.load_candidates(paths), state.load_checkpoint(paths)
-    missing = sum(1 for c in cands if c['id'] not in ckpt)
+    missing = sum(1 for c in cands if not state.is_current_decision(ckpt.get(c['id'])))
     if missing:
         raise PipelineError(f'Finish classifying first: {missing} candidate(s) have no tier yet.')
     return cands, ckpt
@@ -57,7 +61,7 @@ def _human_entries(paths: Paths) -> dict:
     return {str(r[id_i]): r[h_i] for r in rows[1:] if r[id_i] is not None}
 
 
-def _write_sample_workbook(paths: Paths, project: Project, papers: list[dict]) -> None:
+def _write_sample_workbook(paths: Paths, project: Project, papers: list[dict], output: Path | None = None) -> None:
     wb = Workbook()
     ws = wb.active
     ws.title = SHEET
@@ -71,11 +75,52 @@ def _write_sample_workbook(paths: Paths, project: Project, papers: list[dict]) -
     for t in project.tiers:
         guide.append([t.id, t.label, 'yes' if t.included else 'no', t.definition])
     guide.column_dimensions['D'].width = 100
-    save_workbook(wb, paths.validation_xlsx)
+    save_workbook(wb, output or paths.validation_xlsx)
+
+
+def _save_sample(paths: Paths, project: Project, papers: list[dict], sample: dict) -> None:
+    paths.data.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=paths.data) as temp_dir:
+        temp_dir = Path(temp_dir)
+        staged_xlsx = temp_dir / paths.validation_xlsx.name
+        staged_sample = temp_dir / paths.validation_sample.name
+        backups = {}
+        try:
+            _write_sample_workbook(paths, project, papers, staged_xlsx)
+            write_json(staged_sample, sample)
+            for dest in (paths.validation_xlsx, paths.validation_sample):
+                if dest.exists():
+                    backup = temp_dir / f'{dest.name}.backup'
+                    shutil.copy2(dest, backup)
+                    backups[dest] = backup
+
+            replaced = []
+            try:
+                os.replace(staged_xlsx, paths.validation_xlsx)
+                replaced.append(paths.validation_xlsx)
+                os.replace(staged_sample, paths.validation_sample)
+                replaced.append(paths.validation_sample)
+            except OSError:
+                for dest in reversed(replaced):
+                    if dest in backups:
+                        os.replace(backups[dest], dest)
+                    else:
+                        dest.unlink(missing_ok=True)
+                raise
+        except PermissionError as exc:
+            raise PipelineError(
+                f'Could not write {paths.validation_xlsx.name}. If it is open in Excel, close it and run again.'
+            ) from exc
+        except OSError as exc:
+            raise PipelineError(f'Could not safely update the validation workbook and sample metadata: {exc}') from exc
 
 
 def draw_sample(paths: Paths, project: Project, force: bool = False) -> dict:
     cands, ckpt = _classified(paths)
+    if not cands:
+        state.invalidate_validation(paths, remove_sample=True)
+        state.mark_done(paths, 'validate', not_applicable=True)
+        return {'sampled': 0, 'per_tier': {}, 'not_applicable': True}
     if not force and any(v not in (None, '') for v in _human_entries(paths).values()):
         raise PipelineError('validation.xlsx already has tiers you entered. Run with --force to replace it '
                             '(your entries will be lost).')
@@ -91,11 +136,10 @@ def draw_sample(paths: Paths, project: Project, force: bool = False) -> dict:
         chosen.extend(rng.sample(ids, k))
         per_tier[tier_id] = k
     rng.shuffle(chosen)
-    write_json(paths.validation_sample, {'seed': v['seed'], 'ids': chosen,
-                                         'ai_tiers': {i: ckpt[i]['tier'] for i in chosen}})
     by_id = {c['id']: c for c in cands}
-    _write_sample_workbook(paths, project, [by_id[i] for i in chosen])
-    state.clear_from(paths, 'validate')   # a new sample makes earlier agreement statistics out of date
+    sample = {'seed': v['seed'], 'ids': chosen, 'ai_tiers': {i: ckpt[i]['tier'] for i in chosen}}
+    _save_sample(paths, project, [by_id[i] for i in chosen], sample)
+    state.invalidate_validation(paths)
     return {'sampled': len(chosen), 'per_tier': per_tier}
 
 
@@ -116,7 +160,10 @@ def score_sample(paths: Paths, project: Project) -> dict:
     if problems:
         raise PipelineError(f'{len(problems)} row(s) in validation.xlsx still need a valid tier:', problems[:20])
 
-    ids = [i for i in sample['ids'] if i in human]
+    ids = sample['ids']
+    missing = [i for i in ids if i not in human]
+    if missing:
+        raise PipelineError(f'{len(missing)} sampled paper(s) are missing a human tier:', missing[:20])
     if not ids:
         raise PipelineError('validation.xlsx has no rows that match the drawn sample. '
                             'Run: py run.py validate --draw --force')
@@ -141,13 +188,15 @@ def score_sample(paths: Paths, project: Project) -> dict:
     }
     write_json(paths.validation_results, results)
     write_disclosure(paths, project, results)
+    state.invalidate_report(paths)
     state.mark_done(paths, 'validate', n=results['n'], tier_kappa=results['tier_kappa'])
     return results
 
 
 def write_disclosure(paths: Paths, project: Project, results: dict) -> None:
     current = {c['id'] for c in state.load_candidates(paths)}
-    entries = [e for pid, e in state.load_checkpoint(paths).items() if pid in current]
+    entries = [e for pid, e in state.load_checkpoint(paths).items()
+               if pid in current and state.is_current_decision(e)]
     decisions = entries + [h for e in entries for h in e.get('history', [])]
     tools = sorted({f"{d['tool']} ({d['model']})" for d in decisions})
     dates = sorted(d['timestamp'][:10] for d in decisions)

@@ -64,6 +64,15 @@ def test_any_problem_rejects_the_whole_save(prescreened, tmp_path):
     assert not paths.checkpoint.exists()
 
 
+def test_malformed_mapping_entry_rejects_the_whole_save(prescreened, tmp_path):
+    paths, project = prescreened
+    ids = _ids(paths)
+    payload = {ids[0]: {'tier': 1, 'score': 90, 'reason': 'ok'}, ids[1]: None}
+    with pytest.raises(PipelineError):
+        classify.save_results(paths, project, _results(tmp_path, payload), TOOL, MODEL)
+    assert not paths.checkpoint.exists()
+
+
 def test_tool_and_model_are_required(prescreened, tmp_path):
     paths, project = prescreened
     with pytest.raises(PipelineError) as err:

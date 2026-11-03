@@ -47,3 +47,24 @@ def test_same_title_and_year_with_different_dois_stay_separate():
     unique, stats = deduplicate([a, b, c], ORDER)
     assert [r['id'] for r in unique] == ['doi:10.1/a', 'doi:10.1/b']
     assert unique[0]['sources'] == ['pubmed', 'ebsco']
+
+
+def test_doi_match_indexes_incoming_title_and_year_key():
+    pubmed = {'source': 'pubmed', 'doi': '10.1/a', 'pmid': '', 'source_id': '1',
+              'title': 'Original title', 'year': '2020'}
+    wos = {**pubmed, 'source': 'wos', 'title': 'Alternate title', 'year': '2021'}
+    ebsco = {'source': 'ebsco', 'doi': '', 'pmid': '', 'source_id': '3',
+             'title': 'Alternate title', 'year': '2021'}
+    unique, _ = deduplicate([pubmed, wos, ebsco], ORDER)
+    assert len(unique) == 1
+    assert unique[0]['sources'] == ['pubmed', 'wos', 'ebsco']
+
+
+def test_title_year_matching_uses_the_complete_title():
+    prefix = 'A' * 120
+    with_doi = {'source': 'pubmed', 'doi': '10.1/a', 'pmid': '', 'source_id': '1',
+                'title': prefix + ' first', 'year': '2020'}
+    without_doi = {'source': 'wos', 'doi': '', 'pmid': '', 'source_id': '2',
+                   'title': prefix + ' second', 'year': '2020'}
+    unique, _ = deduplicate([with_doi, without_doi], ORDER)
+    assert len(unique) == 2

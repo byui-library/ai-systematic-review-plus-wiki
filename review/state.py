@@ -36,13 +36,17 @@ def load_checkpoint(paths: Paths) -> dict:
     return read_json(paths.checkpoint, {})
 
 
+def is_current_decision(entry: dict | None) -> bool:
+    return isinstance(entry, dict) and 'tier' in entry and not entry.get('stale')
+
+
 def classify_counts(paths: Paths) -> tuple[int, int] | None:
     """(classified, total) for the current candidates, or None before prescreen."""
     candidates = load_candidates(paths, required=False)
     if candidates is None:
         return None
     ckpt = load_checkpoint(paths)
-    return sum(1 for c in candidates if c['id'] in ckpt), len(candidates)
+    return sum(1 for c in candidates if is_current_decision(ckpt.get(c['id']))), len(candidates)
 
 
 # ── Stage tracking ────────────────────────────────────────────────────────────
@@ -67,6 +71,41 @@ def clear_from(paths: Paths, stage: str) -> None:
     s = load_state(paths)
     s['completed'] = {k: v for k, v in s['completed'].items() if k not in later}
     write_json(paths.state, s)
+
+
+def _remove_generated_outputs(paths: Paths) -> None:
+    for path in (paths.validation_results, paths.ai_disclosure, paths.results_xlsx,
+                 paths.included_csv, paths.excluded_csv, paths.prisma_png):
+        path.unlink(missing_ok=True)
+
+
+def invalidate_screening(paths: Paths, stage: str) -> None:
+    """Invalidate decisions and generated outputs while retaining audit and human workbook data."""
+    clear_from(paths, stage)
+    if paths.checkpoint.exists():
+        checkpoint = load_checkpoint(paths)
+        for entry in checkpoint.values():
+            if isinstance(entry, dict) and 'tier' in entry:
+                entry['stale'] = True
+        write_json(paths.checkpoint, checkpoint)
+    if stage == 'import':
+        for path in (paths.candidates, paths.prefilter_excluded, paths.prescreen_excluded):
+            path.unlink(missing_ok=True)
+    paths.validation_sample.unlink(missing_ok=True)
+    _remove_generated_outputs(paths)
+
+
+def invalidate_validation(paths: Paths, remove_sample: bool = False) -> None:
+    clear_from(paths, 'validate')
+    if remove_sample:
+        paths.validation_sample.unlink(missing_ok=True)
+    _remove_generated_outputs(paths)
+
+
+def invalidate_report(paths: Paths) -> None:
+    clear_from(paths, 'report')
+    for path in (paths.results_xlsx, paths.included_csv, paths.excluded_csv, paths.prisma_png):
+        path.unlink(missing_ok=True)
 
 
 def setup_problems(paths: Paths) -> list[str]:

@@ -69,7 +69,7 @@ def _summary_rows(project: Project, stats: dict, data: dict, validation: dict | 
              ('Unique records', stats.get('unique', '')),
              ('Removed by filters (type, language, no abstract)', stats.get('prefilter_excluded', '')),
              ('Removed by keyword prescreen', stats.get('prescreen_excluded', '')),
-             ('Screened by AI', stats.get('candidates', ''))]
+             ('Screened by AI', len(data['included']) + len(data['excluded']))]
     counts = Counter(r['tier'] for r in data['included'] + data['excluded'])
     rows += [(f"  Tier {t.id} {t.label} ({'included' if t.included else 'excluded'})", counts.get(t.id, 0))
              for t in project.tiers]
@@ -119,7 +119,7 @@ def build_prisma(paths: Paths, project: Project, stats: dict, data: dict) -> Non
         f"Records identified\n(n = {stats.get('total_raw', 0)})\n{sources}",
         f"Unique records screened\n(n = {stats.get('unique', 0)})",
         f"Records passing filters\n(n = {stats.get('after_prefilter', 0)})",
-        f"Records screened by AI\n(n = {stats.get('candidates', 0)})",
+        f"Records screened by AI\n(n = {len(data['included']) + len(data['excluded'])})",
         f"Studies included\n(n = {len(data['included'])})\n"
         + '\n'.join(f'{t.label}: {inc.get(t.id, 0)}' for t in project.tiers if t.included),
     ]
@@ -150,6 +150,7 @@ def build_prisma(paths: Paths, project: Project, stats: dict, data: dict) -> Non
 
 
 def run_report(paths: Paths, project: Project) -> dict:
+    state.clear_from(paths, 'report')
     stats = read_json(paths.stats, {})
     data = collect(paths, project)
     # Validation statistics describe the decisions they were scored against; show them only while current.
@@ -158,9 +159,11 @@ def run_report(paths: Paths, project: Project) -> dict:
     write_csv(paths.excluded_csv, data['excluded'])
     build_excel(paths, project, stats, data, validation)
     files = [paths.results_xlsx, paths.included_csv, paths.excluded_csv]
-    if project.outputs.get('prisma'):
+    if project.outputs.get('prisma') and data['unclassified'] == 0:
         build_prisma(paths, project, stats, data)
         files.append(paths.prisma_png)
+    elif paths.prisma_png.exists():
+        paths.prisma_png.unlink()
     if data['unclassified'] == 0:
         state.mark_done(paths, 'report', included=len(data['included']))
     return {'files': files, 'included': len(data['included']), 'excluded': len(data['excluded']),

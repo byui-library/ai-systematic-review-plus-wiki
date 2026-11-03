@@ -88,6 +88,6 @@ def detect_format(path: Path | str) -> str | None:
     cols = {c.strip().lower() for c in header}
     if {'an', 'title', 'contributors'} <= cols:
         return 'ebsco'
-    if 'title' in cols:
+    if cols & {'title', 'article title', 'document title'}:
         return 'csv'
     return None

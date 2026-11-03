@@ -80,6 +80,10 @@ def cmd_validate(args, paths: Paths) -> None:
         print(f"Next step: {state.NEXT['report']}")
         return
     out = validate.draw_sample(paths, project, force=args.force)
+    if out.get('not_applicable'):
+        print('No candidates passed prescreening, so human validation is not applicable.')
+        print(f"Next step: {state.NEXT['report']}")
+        return
     print(f"Drew {out['sampled']} papers into {_rel(paths, paths.validation_xlsx)}.")
     print('Open it, type your own tier for each paper in the "Your tier" column (without looking at the '
           'AI decisions), save, then run: py run.py validate --score')

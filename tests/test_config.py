@@ -92,6 +92,18 @@ def test_wrong_shapes_and_blank_terms_are_problems(workspace):
     assert "keyword group 'sport' terms must be a list" in text
 
 
+def test_non_string_terms_and_non_boolean_included_are_problems(workspace):
+    def change(d):
+        d['prescreen']['keyword_groups'][0]['terms'] = ['gps', 2]
+        d['tiers'][0]['included'] = 'false'
+    _edit(workspace, change)
+    with pytest.raises(ConfigError) as err:
+        load_project(workspace.root)
+    text = '\n'.join(err.value.problems)
+    assert 'terms must be a list' in text
+    assert 'included must be true or false' in text
+
+
 def test_known_sources_match_parsers():
     from review.config import KNOWN_SOURCES
     from review.importers import PARSERS

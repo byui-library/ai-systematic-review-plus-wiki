@@ -72,6 +72,8 @@ def deduplicate(records: list[dict], source_order: list[str]) -> tuple[list[dict
                 by_doi[doi] = existing
             if not existing.get('abstract') and r.get('abstract'):
                 existing['abstract'] = r['abstract']
+            if tkey and (tkey not in by_title or not _conflict(by_title[tkey], existing)):
+                by_title.setdefault(tkey, existing)
             continue
 
         rec = dict(r)

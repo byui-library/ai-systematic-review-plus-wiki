@@ -39,7 +39,7 @@ def _progress(cands: list[dict], ckpt: dict, project: Project) -> dict:
     by_tier = {t: 0 for t in project.tier_ids}
     for c in cands:
         entry = ckpt.get(c['id'])
-        if entry:
+        if state.is_current_decision(entry):
             by_tier[entry['tier']] = by_tier.get(entry['tier'], 0) + 1
     done = sum(by_tier.values())
     return {'total': len(cands), 'classified': done, 'remaining': len(cands) - done, 'by_tier': by_tier}
@@ -54,7 +54,7 @@ def next_batch(paths: Paths, project: Project, size: int | None = None) -> dict:
     if size < 1:
         raise PipelineError('Batch size must be 1 or more.')
     ckpt = state.load_checkpoint(paths)
-    todo = [c for c in state.load_candidates(paths) if c['id'] not in ckpt]
+    todo = [c for c in state.load_candidates(paths) if not state.is_current_decision(ckpt.get(c['id']))]
     papers = [{k: c.get(k) for k in PAPER_FIELDS} for c in todo[:size]]
     batch = {
         'instructions': 'prompts/02-classify.md',
@@ -70,7 +70,7 @@ def _items(data) -> list | None:
     if isinstance(data, dict) and isinstance(data.get('results'), list):
         return data['results']
     if isinstance(data, dict):
-        return [{'id': k, **v} for k, v in data.items() if isinstance(v, dict)]
+        return [{'id': k, **(v if isinstance(v, dict) else {'_invalid': v})} for k, v in data.items()]
     if isinstance(data, list):
         return data
     return None
@@ -80,6 +80,8 @@ def _check_item(r: dict, pid: str, candidate_ids: set[str], seen: set[str],
                 tier_ids: set[int]) -> tuple[list[str], int | None, int | None]:
     """Returns (errors, tier, score) with tier and score parsed once."""
     errors = []
+    if '_invalid' in r:
+        errors.append('decision must be an object')
     if not pid:
         errors.append('missing id')
     elif pid not in candidate_ids:
@@ -142,15 +144,18 @@ def save_results(paths: Paths, project: Project, results_file: Path | str, tool:
         entry = {'tier': r['tier'], 'score': r['score'], 'reason': r['reason'],
                  'tool': tool, 'model': model, 'timestamp': stamp}
         previous = ckpt.get(r['id'])
-        if previous:
+        if isinstance(previous, dict):
+            current = state.is_current_decision(previous)
             entry['history'] = previous.pop('history', []) + [previous]
             changed = True
+            if not current:
+                new += 1
         else:
             new += 1
         ckpt[r['id']] = entry
     write_json(paths.checkpoint, ckpt)
-    if changed:   # earlier decisions moved, so validation statistics and the report are out of date
-        state.clear_from(paths, 'validate')
+    if changed:
+        state.invalidate_validation(paths, remove_sample=True)
 
     prog = _progress(cands, ckpt, project)
     if prog['remaining'] == 0:

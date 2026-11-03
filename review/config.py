@@ -180,9 +180,9 @@ def _merge(base: dict, override: dict, problems: list[str], prefix: str = '') ->
 def _terms(group: dict) -> list[str]:
     """Lower-cased search terms; blanks are dropped. Spaces are kept so ' pca ' matches whole words."""
     terms = group.get('terms')
-    if not isinstance(terms, list):
+    if not isinstance(terms, list) or any(not isinstance(t, str) or not t.strip() for t in terms):
         return []
-    return [str(t).lower() for t in terms if t is not None and str(t).strip()]
+    return [t.lower() for t in terms]
 
 
 def _at_least_one(value) -> bool:
@@ -230,9 +230,11 @@ def _problems(raw: dict) -> list[str]:
             p.append(f"tier {t['id']} needs a label")
         if not str(t.get('definition') or '').strip():
             p.append(f"tier {t['id']} needs a definition")
+        if 'included' in t and not isinstance(t['included'], bool):
+            p.append(f"tier {t['id']} included must be true or false")
     if len(ids) != len(set(ids)):
         p.append('tier ids must be unique')
-    if tiers and not any(isinstance(t, dict) and t.get('included') for t in tiers):
+    if tiers and not any(isinstance(t, dict) and t.get('included') is True for t in tiers):
         p.append('at least one tier must have included: true')
 
     axes = raw.get('concept_axes') or []

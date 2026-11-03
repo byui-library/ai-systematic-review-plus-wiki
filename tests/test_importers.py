@@ -22,6 +22,16 @@ def test_unknown_format_is_none(tmp_path):
     assert detect_format(f) is None
 
 
+@pytest.mark.parametrize('title_header', ['Article Title', 'Document Title'])
+def test_csv_title_alias_is_detected_before_import(tmp_path, title_header):
+    exports = tmp_path / 'exports'
+    exports.mkdir()
+    f = exports / 'records.csv'
+    f.write_text(f'{title_header},Year\nA study,2020\n', encoding='utf-8')
+    records, _ = import_exports(exports, ['csv'])
+    assert records[0]['title'] == 'A study'
+
+
 def test_normalize_doi_and_make_record():
     assert normalize_doi('https://doi.org/10.1/ABC ') == '10.1/abc'
     rec = make_record('ris', title='  A   title ', doi='doi:10.1/X')

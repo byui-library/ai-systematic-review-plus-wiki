@@ -5,6 +5,7 @@ from openpyxl import load_workbook
 from review import classify, report, state, validate
 from review.config import load_project
 from review.errors import PipelineError
+from review.io import read_json, write_json
 from tests.helpers import TIERS, fill_validation
 
 
@@ -80,3 +81,20 @@ def test_redrawing_the_sample_hides_old_statistics(classified):
     validate.draw_sample(paths, project, force=True)
     report.run_report(paths, project)
     assert 'Validation' not in load_workbook(paths.results_xlsx).sheetnames
+
+
+def test_partial_report_counts_only_saved_decisions_and_defers_prisma(classified):
+    paths, project = classified
+    data = yaml.safe_load(paths.project_yaml.read_text(encoding='utf-8'))
+    data['outputs'] = {'prisma': True}
+    paths.project_yaml.write_text(yaml.safe_dump(data), encoding='utf-8')
+    project = load_project(paths.root)
+    checkpoint = read_json(paths.checkpoint)
+    checkpoint.pop('doi:10.1000/example.006')
+    write_json(paths.checkpoint, checkpoint)
+
+    out = report.run_report(paths, project)
+    assert out['unclassified'] == 1 and paths.prisma_png.exists() is False
+    rows = list(load_workbook(paths.results_xlsx)['Summary'].iter_rows(values_only=True))
+    screened = next(row[1] for row in rows if row[0] == 'Screened by AI')
+    assert screened == 3

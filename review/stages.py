@@ -16,7 +16,7 @@ def run_import(paths: Paths, project: Project) -> dict:
     stats['files'] = files
     write_json(paths.records, unique)
     write_json(paths.stats, stats)
-    state.clear_from(paths, 'import')
+    state.invalidate_screening(paths, 'import')
     state.mark_done(paths, 'import', unique=len(unique))
     return stats
 
@@ -34,6 +34,6 @@ def run_prescreen(paths: Paths, project: Project) -> dict:
     counts = {'prefilter_excluded': len(pre_ex), 'after_prefilter': len(keep),
               'prescreen_excluded': len(ps_ex), 'candidates': len(cands)}
     write_json(paths.stats, {**read_json(paths.stats, {}), **counts})
-    state.clear_from(paths, 'prescreen')
+    state.invalidate_screening(paths, 'prescreen')
     state.mark_done(paths, 'prescreen', candidates=len(cands))
     return counts

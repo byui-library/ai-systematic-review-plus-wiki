@@ -1,5 +1,8 @@
-from review import state
+import pytest
+
+from review import classify, state, stages
 from review.config import Paths
+from review.errors import PipelineError
 from review.io import write_json
 
 
@@ -32,3 +35,15 @@ def test_classify_done_is_computed_from_checkpoint(workspace):
     assert '1/2 classified' in state.status_text(workspace)
     write_json(workspace.checkpoint, {'a': {'tier': 1}, 'b': {'tier': 2}})
     assert state.next_stage(workspace) == 'validate'
+
+
+def test_import_invalidates_candidates_but_preserves_audit_and_human_work(classified):
+    paths, project = classified
+    paths.validation_xlsx.write_bytes(b'human work')
+    stages.run_import(paths, project)
+    assert not paths.candidates.exists()
+    assert state.classify_counts(paths) is None
+    assert all(entry['stale'] for entry in state.load_checkpoint(paths).values())
+    assert paths.validation_xlsx.read_bytes() == b'human work'
+    with pytest.raises(PipelineError):
+        classify.next_batch(paths, project)
