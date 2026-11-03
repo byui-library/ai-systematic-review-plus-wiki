@@ -1,19 +1,31 @@
-# Secrets
+# ── Never commit ──────────────────────────────────────────────────────────────
+# Credentials (LibKey, Unpaywall)
 .env
+# Full-text PDFs are copyrighted
+*.pdf
+*.pdf.part
 
-# Python
+# ── Your review's data IS committed ───────────────────────────────────────────
+# data/ is the audit trail: exports, every AI decision with its reason, validation results.
+# Keep your copy of this repository PRIVATE: exports contain publishers' abstracts.
+# Only scratch files that are rewritten on every step are ignored:
+data/classify_batch.json
+data/wiki_paper.json
+*.tmp
+
+# ── Generated, rebuilt on demand ──────────────────────────────────────────────
+mkdocs.yml
+site/
+site-*/
+demo-workspace/
+~$*.xlsx
+
+# ── Tools ─────────────────────────────────────────────────────────────────────
 .venv/
 __pycache__/
 *.pyc
 .pytest_cache/
-
-# Researcher data and generated outputs
-data/
-demo-workspace/
-site/
-*.pdf
-*.pdf.part
-~$*.xlsx
+.obsidian/workspace*.json
 
 # Maintainer-only notes
 CLAUDE.local.md

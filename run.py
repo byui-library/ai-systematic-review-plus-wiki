@@ -3,12 +3,33 @@
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
 import sys
 from pathlib import Path
 
-from review import classify, figures, graph, pdfs, report, stages, state, tables, validate, wiki
-from review.config import Paths, load_project, summary
-from review.errors import PipelineError
+
+def _use_project_venv() -> None:
+    """Re-run with the project's .venv Python, so `py run.py` works without activating anything.
+
+    Only the standard library may be used above this point: the packages live in .venv.
+    """
+    if os.environ.get('REVIEW_NO_VENV'):
+        return
+    venv = Path(__file__).resolve().parent / '.venv'
+    python = venv / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+    if python.exists() and Path(sys.prefix).resolve() != venv.resolve():
+        result = subprocess.run([str(python), str(Path(__file__).resolve()), *sys.argv[1:]],
+                                env={**os.environ, 'REVIEW_NO_VENV': '1'})
+        sys.exit(result.returncode)
+
+
+if __name__ == '__main__':
+    _use_project_venv()
+
+from review import classify, figures, graph, pdfs, report, stages, state, tables, validate, wiki  # noqa: E402
+from review.config import Paths, load_project, summary  # noqa: E402
+from review.errors import PipelineError  # noqa: E402
 
 
 def _rel(paths: Paths, p: Path) -> str:
