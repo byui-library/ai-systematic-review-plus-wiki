@@ -47,7 +47,8 @@ def put(ws, row: int, column: int, value):
 
 
 def csv_safe(value) -> str:
-    """A CSV cell that Excel will show as text: formula-like values get a leading apostrophe."""
+    """A CSV cell for analysis in R, Python, or Excel: formula-like values get a leading apostrophe so Excel shows them
+    as text. Long values are kept whole; Excel itself shows at most 32,767 characters per cell, so use the .xlsx there."""
     value = excel_safe(value, limit=None)   # a CSV has no cell limit; keep long values whole for R or Python
     if value is None:
         return ''

@@ -17,7 +17,7 @@
    - `tables`: how many tables were found, and `note`: anything you must tell the researcher
    - `metadata`, `extraction_columns` (what to record, with hints), and `appraisal_checklist` (if appraisal is configured)
 3. **Read the whole paper.**
-   - If `text` is empty, open every file in `parts`, in order. Together they are the entire paper, with nothing cut out. Each page starts with `--- page N ---`, so you can cite page numbers.
+   - If `text` is empty, open every file in `parts`, in order. Together they hold every page that was read: the entire paper, unless `complete` is false. Each page starts with `--- page N ---`, so you can cite page numbers.
    - Tables found in the PDF are repeated after their page as a **Markdown table** (`Table 1 on page 6: …`). Take numbers from these Markdown tables rather than from the run-together page text, because they keep each value in its row and column.
    - If `scanned` is true, the PDF is an image without a text layer. Work from the abstract, and tell the researcher that adding a text layer (OCR) would let you read the full paper (see `docs/06-pdfs.md`).
    - If `complete` is false, the PDF has more than 400 pages. Say which pages you read.

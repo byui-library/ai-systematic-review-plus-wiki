@@ -386,7 +386,8 @@ class _RootHints:
         self._stream, self._prefix = stream, f'py run.py --root {root} '
 
     def write(self, text: str) -> int:
-        return self._stream.write(_HINT.sub(lambda _: self._prefix, text))   # a function: Windows paths have backslashes
+        self._stream.write(_HINT.sub(lambda _: self._prefix, text))   # a function: Windows paths have backslashes
+        return len(text)   # report what the caller wrote, as a text stream must
 
     def __getattr__(self, name):
         return getattr(self._stream, name)
@@ -396,6 +397,8 @@ def _shell_quote(root: str, windows: bool) -> str:
     """Quote a folder so it pastes back unchanged: shlex rules on Mac/Linux, double quotes on Windows when needed."""
     if not windows:
         return shlex.quote(root)
+    if len(root) > 3:   # a trailing backslash would escape the closing quote: "C:\My Review\" breaks
+        root = root.rstrip('\\/')
     return f'"{root}"' if any(c in root for c in " &()^;,'`$") else root
 
 

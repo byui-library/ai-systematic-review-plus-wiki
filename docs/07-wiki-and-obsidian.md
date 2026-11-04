@@ -39,7 +39,7 @@ After each page it runs `py run.py wiki --check`, which validates every paper pa
 
 ## Your extracted data as a spreadsheet
 
-Every time the tables are rebuilt (`py run.py wiki --tables`), the extracted data is also written to **`data/extraction.xlsx`**. It has an *All* sheet plus one sheet per included tier, with one row per paper and one column per extraction field, plus the appraisal rating. The same data is written to `data/extraction.csv`. Use these for your own analysis in Excel, SPSS, R, or Python. Papers not yet written appear with status `stub` and empty values.
+Every time the tables are rebuilt (`py run.py wiki --tables`), the extracted data is also written to **`data/extraction.xlsx`**. It has an *All* sheet plus one sheet per included tier, with one row per paper and one column per extraction field, plus the appraisal rating. The same data is written to `data/extraction.csv`. Use these for your own analysis in Excel, SPSS, R, or Python. The CSV keeps very long values whole; Excel cells hold at most 32,767 characters, so in Excel open the `.xlsx`. Papers not yet written appear with status `stub` and empty values.
 
 ## What you may edit
 

@@ -1,6 +1,6 @@
 import pytest
 from review.io import read_json, write_json
-from run import main
+from run import _root_for_hints, main
 from tests.helpers import TIERS, fill_validation
 
 
@@ -28,7 +28,7 @@ def test_full_core_pipeline(workspace, capsys):
 
     capsys.readouterr()
     assert main(root + ['status']) == 0
-    assert f'Next step: py run.py --root {workspace.root} pdfs' in capsys.readouterr().out
+    assert f'Next step: py run.py --root {_root_for_hints(str(workspace.root))} pdfs' in capsys.readouterr().out
 
 
 def test_problem_exits_1_with_friendly_message(tmp_path, capsys):
@@ -42,15 +42,11 @@ def test_no_command_shows_status(workspace, capsys):
 
 
 def test_hints_repeat_the_root_the_user_gave(tmp_path, monkeypatch, capsys):
-    import os
-    from run import _shell_quote
-
     folder = tmp_path / 'My Review'
     folder.mkdir()
     main(['--root', str(folder), 'status'])
     out = capsys.readouterr().out
-    quoted_folder = _shell_quote(str(folder), windows=os.name == 'nt')
-    assert f'py run.py --root {quoted_folder} ' in out and 'py run.py import' not in out
+    assert f'py run.py --root {_root_for_hints(str(folder))} ' in out and 'py run.py import' not in out
 
 
 def test_hints_are_unchanged_for_the_template_folder(capsys):
@@ -73,6 +69,7 @@ def test_hints_never_repeat_a_root_twice(tmp_path, monkeypatch, capsys):
     ('/tmp/plain', False, '/tmp/plain'),
     (r'C:\Reviews\My Review', True, r'"C:\Reviews\My Review"'),
     (r'C:\Reviews\plain', True, r'C:\Reviews\plain'),
+    ('C:\\My Review\\', True, r'"C:\My Review"'),   # a trailing backslash would escape the closing quote
 ])
 def test_root_is_quoted_for_the_shell(root, windows, expected):
     from run import _shell_quote
