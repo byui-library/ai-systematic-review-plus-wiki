@@ -42,11 +42,15 @@ def test_no_command_shows_status(workspace, capsys):
 
 
 def test_hints_repeat_the_root_the_user_gave(tmp_path, monkeypatch, capsys):
+    import os
+    from run import _shell_quote
+
     folder = tmp_path / 'My Review'
     folder.mkdir()
     main(['--root', str(folder), 'status'])
     out = capsys.readouterr().out
-    assert f'py run.py --root "{folder}" ' in out and 'py run.py import' not in out
+    quoted_folder = _shell_quote(str(folder), windows=os.name == 'nt')
+    assert f'py run.py --root {quoted_folder} ' in out and 'py run.py import' not in out
 
 
 def test_hints_are_unchanged_for_the_template_folder(capsys):
