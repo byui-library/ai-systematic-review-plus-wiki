@@ -188,6 +188,46 @@ def test_setup_doc_shows_every_type_and_framework():
         assert f'framework: {name}' in text or f'review_type: {name}' in text, name
 
 
+def _legacy_prompt(picos: dict | None) -> str:
+    """The criteria block exactly as build_prompt wrote it before review types (from the git history)."""
+    order = list(LEGACY_KEYS) + [k for k in (picos or {}) if k not in LEGACY_KEYS]
+    values = {**dict.fromkeys(LEGACY_KEYS, ''), **(picos or {})}
+    return 'PICOS CRITERIA:\n' + '\n'.join(f"  {k.replace('_', ' ').title():<26}: {values[k]}"
+                                           for k in order if str(values[k] or '').strip()) + '\n\n'
+
+
+LEGACY_KEYS = ('population', 'intervention_or_exposure', 'comparison', 'outcomes', 'study_design')
+
+
+@pytest.mark.parametrize('picos', [
+    {'population': 'Athletes\n', 'outcomes': 'Load  '},                  # block scalars and trailing spaces
+    {'population': 'Athletes', 'setting': 'Elite clubs', 'time_frame': '2000 onward'},   # extra rows
+    {},                                                                  # an empty picos section
+    None,                                                                # no picos section at all
+])
+def test_legacy_picos_prompt_is_unchanged(tmp_path, picos):
+    data = yaml.safe_load((REPO / 'tests/fixtures/project.yaml').read_text(encoding='utf-8'))
+    if picos is None:
+        data.pop('picos')
+    else:
+        data['picos'] = picos
+    (tmp_path / 'project.yaml').write_text(yaml.safe_dump(data, sort_keys=False), encoding='utf-8')
+    assert _legacy_prompt(picos) + 'TIERS:' in build_prompt(load_project(tmp_path))
+
+
+def test_empty_picos_next_to_criteria_is_fine(tmp_path):
+    assert load_project(write_project(tmp_path, picos={}, criteria=PCC)).framework == 'PCC'
+
+
+def test_a_string_include_gets_one_clear_message(tmp_path):
+    text = problems(tmp_path, criteria={'framework': 'plain', 'include': 'About X'})
+    assert 'criteria.include should be a list' in text and 'need at least one include rule' not in text
+
+
+def test_misspelt_criteria_settings_are_reported(tmp_path):
+    assert 'criteria has an unknown setting "includes"' in problems(tmp_path, criteria={**PCC, 'includes': ['x']})
+
+
 def test_summary_names_type_and_criteria(tmp_path):
     from review.config import summary
     text = summary(load_project(write_project(tmp_path, review_type='scoping', criteria=PCC)))

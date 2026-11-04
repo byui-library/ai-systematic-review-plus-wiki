@@ -52,15 +52,18 @@ Framework element labels:
 
 | Framework | Elements (in order) | Required |
 | --- | --- | --- |
-| PICOS | Population, Intervention or exposure, Comparison, Outcomes, Study design | at least one element filled (as today: empty ones are left out) |
+| PICOS | Population, Intervention or exposure, Comparison, Outcomes, Study design, plus any extra rows (e.g. Setting) after them | nothing (as before: empty ones are left out, and an empty PICOS still loads) |
 | PCC | Population, Concept, Context | all three |
 | SPIDER | Sample, Phenomenon of interest, Design, Evaluation, Research type | Sample, Phenomenon of interest |
 | plain | none | `include` has at least one item |
 | custom | the researcher's own labels | at least one element |
 
 **Legacy mapping.** `picos: {population, intervention_or_exposure, comparison, outcomes, study_design}` becomes
-`criteria: {framework: PICOS, elements: {...}}` with the labels above. If both `picos:` and `criteria:` are
-present, `check-config` reports it and asks for one.
+`criteria: {framework: PICOS, elements: {...}}` with the labels above. Any other key becomes an extra PICOS row
+(`time_frame` becomes `Time frame`), because older files screened on those rows. Values are kept unstripped
+for the same reason. If both a non-empty `picos:` and `criteria:` are present, `check-config` reports it and
+asks for one. (Revised after code review: the first draft rejected extra keys and empty PICOS, which would
+have stopped older projects from loading.)
 
 **Validation (`check-config`)**, in plain English, for example:
 - `review_type must be one of systematic, scoping, qualitative, collection, methods`

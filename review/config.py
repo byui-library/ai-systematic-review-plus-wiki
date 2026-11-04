@@ -297,19 +297,17 @@ def _legacy_picos(data: dict, problems: list[str]) -> dict:
         return data
     data = dict(data)
     picos = data.pop('picos')
+    if not picos:   # an empty `picos:` left behind is harmless
+        return data
     if 'criteria' in data:
         problems.append('project.yaml has both picos and criteria: keep criteria and delete the picos section')
-        return data
-    if picos is None:
         return data
     if not isinstance(picos, dict):
         problems.append('picos should be a section of "name: value" settings')
         return data
-    unknown = [k for k in picos if k not in LEGACY_PICOS]
-    if unknown:
-        problems.append(f'picos contains unknown entries {unknown}; use {list(LEGACY_PICOS)}')
-    data['criteria'] = {'framework': 'PICOS',
-                        'elements': {LEGACY_PICOS[k]: v for k, v in picos.items() if k in LEGACY_PICOS}}
+    # Extra keys (for example `setting:`) were always accepted and screened on, so they stay as extra PICOS rows.
+    data['criteria'] = {'framework': 'PICOS', 'elements': {
+        LEGACY_PICOS.get(k, str(k).replace('_', ' ').capitalize()): v for k, v in picos.items()}}
     return data
 
 
@@ -321,7 +319,12 @@ def _type_defaults(data: dict) -> dict:
 
 
 def _filled(elements: dict) -> dict:
-    return {str(k).strip(): str(v).strip() for k, v in elements.items() if v is not None and str(v).strip()}
+    """Elements with text. Values are kept exactly as written (only the blank test strips them): the prompt
+    has always printed them unstripped, so stripping would change existing PICOS fingerprints."""
+    return {str(k).strip(): str(v) for k, v in elements.items() if str(v or '').strip()}
+
+
+CRITERIA_KEYS = ('framework', 'elements', 'include', 'exclude')
 
 
 def _criteria_problems(c: dict) -> list[str]:
@@ -331,13 +334,14 @@ def _criteria_problems(c: dict) -> list[str]:
     elements = c.get('elements') or {}
     if not isinstance(elements, dict):
         return ['criteria.elements should be a section of "label: text" settings']
-    p: list[str] = []
+    p: list[str] = [f'criteria has an unknown setting "{k}"; use {", ".join(CRITERIA_KEYS)}'
+                    for k in c if k not in CRITERIA_KEYS]
     for key in ('include', 'exclude'):
         if any(not isinstance(r, str) or not r.strip() for r in c.get(key) or []):
             p.append(f'criteria.{key} must be a list of rules, for example: {key}: [Peer-reviewed studies]')
     labels = FRAMEWORKS[name]['elements']
     filled = {_label_key(k) for k in _filled(elements)}
-    if labels is not None:
+    if labels is not None and name != 'PICOS':   # PICOS may carry extra rows, such as Setting
         known = {_label_key(label) for label in labels}
         for k in elements:
             if _label_key(k) in known:
@@ -351,10 +355,11 @@ def _criteria_problems(c: dict) -> list[str]:
         missing = [r for r in required if _label_key(r) not in filled]
         if missing:
             p.append(f'{name} needs {", ".join(required[:-1])} and {required[-1]} (missing: {", ".join(missing)})')
-    if name == 'plain' and not any(isinstance(r, str) and r.strip() for r in c.get('include') or []):
+    include = c.get('include') or []
+    if name == 'plain' and isinstance(include, list) and not any(isinstance(r, str) and r.strip() for r in include):
         p.append('plain criteria need at least one include rule')
-    if name in ('PICOS', 'custom') and not filled:
-        p.append(f'{name} criteria need at least one element filled in')
+    if name == 'custom' and not filled:   # PICOS may be empty: older projects with no picos section still load
+        p.append('custom criteria need at least one element filled in')
     return p
 
 
@@ -365,7 +370,9 @@ def _normalise_criteria(c: dict) -> dict:
     labels = FRAMEWORKS[name]['elements']
     if labels is not None:
         by_key = {_label_key(k): v for k, v in filled.items()}
-        filled = {label: by_key[_label_key(label)] for label in labels if _label_key(label) in by_key}
+        known = {_label_key(label) for label in labels}
+        extras = {k: v for k, v in filled.items() if _label_key(k) not in known}   # PICOS only (validated)
+        filled = {label: by_key[_label_key(label)] for label in labels if _label_key(label) in by_key} | extras
     return {'framework': name, 'elements': filled,
             'include': [r.strip() for r in c.get('include') or []],
             'exclude': [r.strip() for r in c.get('exclude') or []]}
@@ -467,7 +474,8 @@ def load_project(root: Path | str) -> Project:
     problems: list[str] = []
     data = _legacy_picos(data, problems)
     raw = _merge(_type_defaults(data), data, problems)
-    problems += _problems(raw)
+    shape_problem = any(q.startswith('criteria.include ') for q in problems)   # the default [] was kept
+    problems += [q for q in _problems(raw) if not (shape_problem and q.startswith('plain criteria need'))]
     if problems:
         raise ConfigError(problems)
 

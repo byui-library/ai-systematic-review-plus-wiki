@@ -13,12 +13,20 @@ question: >
   What is the effect of retrieval practice (practice testing, quizzing) on learning outcomes
   in undergraduate STEM courses, compared with restudying or no intervention?
 
-picos:
-  population: Undergraduate students in STEM courses
-  intervention_or_exposure: Retrieval practice (practice tests, low-stakes quizzes, flashcards with recall)
-  comparison: Restudy, re-reading, or no intervention
-  outcomes: Exam scores, retention, course grades, or other measured learning outcomes
-  study_design: Peer-reviewed experimental or quasi-experimental studies and systematic reviews
+# systematic | scoping | qualitative | collection | methods. Sets the wording and some defaults
+# (see docs/03-setup.md, "Review types and criteria", for an example of each).
+review_type: systematic
+
+criteria:
+  framework: PICOS                      # PICOS | PCC | SPIDER | plain | custom
+  elements:
+    Population: Undergraduate students in STEM courses
+    Intervention or exposure: Retrieval practice (practice tests, low-stakes quizzes, flashcards with recall)
+    Comparison: Restudy, re-reading, or no intervention
+    Outcomes: Exam scores, retention, course grades, or other measured learning outcomes
+    Study design: Peer-reviewed experimental or quasi-experimental studies and systematic reviews
+  include: []                           # optional extra rules, e.g. [Published 2010 or later]
+  exclude: []
 
 # Databases you exported from. Order sets priority when the same paper appears in several.
 sources: [pubmed, wos, ebsco, ris, csv]
@@ -79,7 +87,7 @@ extraction_columns:
   - {name: Effect, hint: 'direction and size'}
 
 concept_axes: [interventions, outcomes, populations]
-appraisal: {tool: JBI}          # AXIS | CASP | JBI | RoB2 | none
+appraisal: {tool: JBI}          # AXIS | CASP | CASP-Qual | JBI | RoB2 | none (leave out to use the review type's default)
 outputs: {prisma: false, figures: true, knowledge_graph: true}
 pdfs: {libkey: true, unpaywall: true}
 site:

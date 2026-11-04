@@ -47,7 +47,7 @@
 
 ## Finish
 
-1. Write `project.yaml`, starting from the structure of `project.example.yaml`, with short comments the researcher can read later. Use `review_type` and `criteria` (see `docs/03-setup.md`) in place of the example's `picos` section.
+1. Write `project.yaml`, starting from the structure of `project.example.yaml`, with short comments the researcher can read later. For a type other than systematic, follow that type's `criteria` example in `docs/03-setup.md`.
 2. Run `py run.py check-config`. If it lists problems, fix them (ask the researcher when a fix needs their decision) and run it again until it passes.
 3. Show the summary it prints, and tell the researcher the next step: save their database exports in `data/exports/` (see `docs/02-search-and-export.md`), then run `py run.py import`.
 
