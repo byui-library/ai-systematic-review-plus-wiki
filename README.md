@@ -7,7 +7,7 @@ Run a systematic literature review with an AI assistant doing the heavy reading,
 - **An Obsidian wiki** of the included papers: one page per paper, plus extraction tables, quality appraisal, concept pages, debates between papers, figures, and an interactive knowledge graph
 - **A website** made from that wiki, which you can keep private, put on GitHub Pages, or put on BYU-Idaho's openEQUELLA
 
-It works with any research question and any database that can export RIS or CSV. PubMed, Web of Science, and EBSCO files work directly. You work with an AI assistant, either [Claude Code](https://claude.com/claude-code) or [Codex](https://openai.com/codex/): you tell it what you want in plain English, and it runs the steps for you.
+It works with any research question and any database that can export RIS or CSV. PubMed, Web of Science, and EBSCO files work directly. Besides systematic reviews (PICOS), it handles scoping reviews (PCC), qualitative evidence syntheses (SPIDER), topic collections, and methods reviews: [choose a type](docs/03-setup.md#review-types-and-criteria). You work with an AI assistant, either [Claude Code](https://claude.com/claude-code) or [Codex](https://openai.com/codex/): you tell it what you want in plain English, and it runs the steps for you.
 
 The method was first used for a published sports-science systematic review at BYU-Idaho.
 

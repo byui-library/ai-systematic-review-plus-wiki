@@ -173,6 +173,21 @@ def test_casp_qual_runs_through_the_wiki(classified):
     assert 'CASP-Qual' in (paths.wiki / 'tables/appraisal.md').read_text(encoding='utf-8')
 
 
+def test_setup_interview_covers_types_and_frameworks():
+    from review.config import FRAMEWORKS, REVIEW_TYPES
+    text = (REPO / 'prompts/01-setup-interview.md').read_text(encoding='utf-8')
+    for name in [*REVIEW_TYPES, *FRAMEWORKS, 'CASP-Qual']:
+        assert f'`{name}`' in text, name
+    assert 'Sets `picos`' not in text
+
+
+def test_setup_doc_shows_every_type_and_framework():
+    from review.config import FRAMEWORKS, REVIEW_TYPES
+    text = (REPO / 'docs/03-setup.md').read_text(encoding='utf-8')
+    for name in [*REVIEW_TYPES, *FRAMEWORKS]:
+        assert f'framework: {name}' in text or f'review_type: {name}' in text, name
+
+
 def test_summary_names_type_and_criteria(tmp_path):
     from review.config import summary
     text = summary(load_project(write_project(tmp_path, review_type='scoping', criteria=PCC)))
