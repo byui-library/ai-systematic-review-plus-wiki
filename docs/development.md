@@ -54,12 +54,12 @@ Commands: `status`, `check-config`, `import`, `prescreen`, `classify --next-batc
 
 | Module | Responsibility |
 | --- | --- |
-| `config.py` | `Paths` (every file location), `load_project` (defaults + shape checks + validation of `project.yaml`), `whole_number`, `summary` |
+| `config.py` | `Paths` (every file location), `load_project` (defaults + shape checks + validation of `project.yaml`), `whole_number`, `summary`. `REVIEW_TYPES` and `FRAMEWORKS`: a type's defaults are merged under the researcher's settings, and a legacy `picos:` block is read as `criteria` with framework PICOS |
 | `stages.py` | `run_import` and `run_prescreen`: read inputs, write data files, record progress |
 | `importers/` | One parser per export format plus `detect_format`; `import_exports` reads `data/exports/` |
 | `dedup.py` | DOI → PMID → title+year matching; stable ids; `sources[]` |
 | `screen.py` | Hard filters (`exclude` flags) and weighted keyword score (each group counts once) |
-| `prompt.py` | `build_prompt` (question, PICOS, tiers, **and all decision rules**), `prompt_fingerprint`, `paper_fingerprint`. A saved decision counts only while both fingerprints match: re-running import or prescreen keeps AI work, while editing the criteria or getting new paper information (e.g. an abstract) retires it. Keep decision rules in the prompt, not in `prompts/02-classify.md`, or rule changes won't retire old decisions |
+| `prompt.py` | `build_prompt` (question, review type, criteria, tiers, **and all decision rules**; the PICOS prompt is pinned by fingerprint in `tests/test_review_types.py`, so never change its wording), `prompt_fingerprint`, `paper_fingerprint`. A saved decision counts only while both fingerprints match: re-running import or prescreen keeps AI work, while editing the criteria or getting new paper information (e.g. an abstract) retires it. Keep decision rules in the prompt, not in `prompts/02-classify.md`, or rule changes won't retire old decisions |
 | `classify.py` | Batch out, validated + audited save in (`tool`, `model`, `timestamp`, `history`) |
 | `validate.py` | Stratified blind sample → `validation.xlsx`, Cohen's kappa, draft AI disclosure |
 | `report.py` | `Results.xlsx`, CSVs, opt-in PRISMA |

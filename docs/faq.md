@@ -3,6 +3,9 @@
 **Do I need to know how to code?**
 No. You ask your AI assistant in plain words and it runs the commands. The commands are in these guides in case you want to run them yourself.
 
+**My project isn't a PICOS systematic review. Can I still use this?**
+Yes. When the assistant sets up your review, tell it what kind of project it is: a scoping review (PCC), a qualitative evidence synthesis (SPIDER), a topic collection with plain include and exclude rules, or a methods review with your own criteria. The wording, the defaults, and the Methods page follow your choice. See [Review types and criteria](03-setup.md#review-types-and-criteria).
+
 **What does it cost?**
 The template is free. You need an AI assistant subscription (Claude or ChatGPT/Codex). The demo needs no subscription.
 

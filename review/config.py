@@ -10,14 +10,43 @@ import yaml
 
 from .errors import PipelineError
 KNOWN_SOURCES = ('pubmed', 'wos', 'ebsco', 'ris', 'csv')   # must match importers.PARSERS (tested)
-APPRAISAL_TOOLS = ('AXIS', 'CASP', 'JBI', 'RoB2', 'none')
+APPRAISAL_TOOLS = ('AXIS', 'CASP', 'CASP-Qual', 'JBI', 'RoB2', 'none')
 HOSTING_TARGETS = ('local', 'github_pages', 'openequella')
+
+# Each review type sets the wording used in the prompt, Methods page, and disclosure, and the defaults below.
+# A default applies only where the researcher's project.yaml leaves the setting out.
+REVIEW_TYPES: dict[str, dict] = {
+    'systematic': {'noun': 'systematic review', 'framework': 'PICOS', 'appraisal': 'AXIS',
+                   'validation': {'sample_percent': 10, 'min_per_tier': 5}, 'flow_title': 'PRISMA 2020 flow diagram'},
+    'scoping': {'noun': 'scoping review', 'framework': 'PCC', 'appraisal': 'none',
+                'validation': {'sample_percent': 10, 'min_per_tier': 5}, 'flow_title': 'PRISMA-ScR flow diagram'},
+    'qualitative': {'noun': 'qualitative evidence synthesis', 'framework': 'SPIDER', 'appraisal': 'CASP-Qual',
+                    'validation': {'sample_percent': 10, 'min_per_tier': 5}, 'flow_title': 'PRISMA 2020 flow diagram'},
+    'collection': {'noun': 'literature collection', 'framework': 'plain', 'appraisal': 'none',
+                   'validation': {'sample_percent': 5, 'min_per_tier': 3}, 'flow_title': 'Flow of records'},
+    'methods': {'noun': 'methods review', 'framework': 'custom', 'appraisal': 'none',
+                'validation': {'sample_percent': 5, 'min_per_tier': 3}, 'flow_title': 'Flow of records'},
+}
+# elements: the framework's labels in order (None: the researcher names their own); required: labels that must be filled.
+FRAMEWORKS: dict[str, dict] = {
+    'PICOS': {'elements': ('Population', 'Intervention or exposure', 'Comparison', 'Outcomes', 'Study design'),
+              'required': ()},
+    'PCC': {'elements': ('Population', 'Concept', 'Context'), 'required': ('Population', 'Concept', 'Context')},
+    'SPIDER': {'elements': ('Sample', 'Phenomenon of interest', 'Design', 'Evaluation', 'Research type'),
+               'required': ('Sample', 'Phenomenon of interest')},
+    'plain': {'elements': (), 'required': ()},
+    'custom': {'elements': None, 'required': ()},
+}
+NAMED_FRAMEWORKS = ('PICOS', 'PCC', 'SPIDER')
+# The original `picos:` block, still accepted: its keys map onto the PICOS labels.
+LEGACY_PICOS = {'population': 'Population', 'intervention_or_exposure': 'Intervention or exposure',
+                'comparison': 'Comparison', 'outcomes': 'Outcomes', 'study_design': 'Study design'}
 
 DEFAULTS: dict = {
     'project': {'title': '', 'short_name': 'review', 'researcher': '', 'institution': '', 'ai_operator': ''},
     'question': '',
-    'picos': {'population': '', 'intervention_or_exposure': '', 'comparison': '', 'outcomes': '',
-              'study_design': ''},
+    'review_type': 'systematic',
+    'criteria': {'framework': None, 'elements': {}, 'include': [], 'exclude': []},
     'sources': list(KNOWN_SOURCES),
     'prescreen': {
         'keyword_groups': [],
@@ -111,8 +140,37 @@ class Project:
         return self.raw['question']
 
     @property
-    def picos(self) -> dict:
-        return self.raw['picos']
+    def review_type(self) -> str:
+        return self.raw['review_type']
+
+    @property
+    def review_noun(self) -> str:
+        return REVIEW_TYPES[self.review_type]['noun']
+
+    @property
+    def flow_title(self) -> str:
+        return REVIEW_TYPES[self.review_type]['flow_title']
+
+    @property
+    def framework(self) -> str:
+        return self.raw['criteria']['framework']
+
+    @property
+    def criteria_name(self) -> str:
+        """'PICOS', 'PCC' or 'SPIDER'; 'eligibility' for plain and custom criteria."""
+        return self.framework if self.framework in NAMED_FRAMEWORKS else 'eligibility'
+
+    @property
+    def criteria_elements(self) -> list[tuple[str, str]]:
+        return list(self.raw['criteria']['elements'])
+
+    @property
+    def include_rules(self) -> list[str]:
+        return list(self.raw['criteria']['include'])
+
+    @property
+    def exclude_rules(self) -> list[str]:
+        return list(self.raw['criteria']['exclude'])
 
     @property
     def sources(self) -> list[str]:
@@ -219,12 +277,131 @@ def _at_least_one(value) -> bool:
     return n is not None and n >= 1
 
 
+def _label_key(label) -> str:
+    return str(label).strip().lower().replace('_', ' ')
+
+
+def _framework(value) -> str | None:
+    """The canonical framework name for a loosely typed one ('pcc' -> 'PCC'); None if unknown."""
+    return next((name for name in FRAMEWORKS if isinstance(value, str) and value.strip().lower() == name.lower()), None)
+
+
+def _review_type(data: dict) -> str:
+    kind = data.get('review_type')
+    return kind if isinstance(kind, str) and kind in REVIEW_TYPES else 'systematic'
+
+
+def _legacy_picos(data: dict, problems: list[str]) -> tuple[dict, list[tuple[str, str]] | None]:
+    """Read an old `picos:` block as `criteria` with framework PICOS.
+
+    Also returns its rows exactly as the old prompt printed them: the five standard keys first, then any
+    other key in file order, nothing merged or reordered. Two keys that differ only in case (`population`
+    and `Population`) stay two rows, and `Outcomes:` stays an extra row. Changing either would change the
+    prompt fingerprint and retire the project's saved decisions. None when there is no legacy block."""
+    if 'picos' not in data:
+        return data, None
+    data = dict(data)
+    picos = data.pop('picos')
+    if not picos:   # an empty `picos:` left behind is harmless
+        return data, None
+    if data.get('criteria'):   # an empty `criteria:` line next to it is harmless too
+        problems.append('project.yaml has both picos and criteria: keep criteria and delete the picos section')
+        return data, None
+    if not isinstance(picos, dict):
+        problems.append('picos should be a section of "name: value" settings')
+        return data, None
+    # Extra keys (for example `setting:`) were always accepted and screened on, so they stay as extra PICOS rows.
+    order = [k for k in LEGACY_PICOS if k in picos] + [k for k in picos if k not in LEGACY_PICOS]
+    # Other keys keep their own spelling (only `_` becomes a space): the prompt title-cases labels, which then
+    # gives exactly the old `key.replace('_', ' ').title()`, even for non-ASCII keys.
+    rows = [(LEGACY_PICOS.get(k, str(k).replace('_', ' ')), str(picos[k]))
+            for k in order if str(picos[k] or '').strip()]
+    # PICOS validation checks only the shape, so a collapsed copy is enough; the rows themselves are kept.
+    data['criteria'] = {'framework': 'PICOS', 'elements': dict(rows)}
+    return data, rows
+
+
+def _type_defaults(data: dict) -> dict:
+    """DEFAULTS with the review type's own defaults on top; the researcher's settings go on top of this."""
+    t = REVIEW_TYPES[_review_type(data)]
+    return _merge(DEFAULTS, {'appraisal': {'tool': t['appraisal']}, 'validation': t['validation'],
+                             'criteria': {'framework': t['framework']}}, [])
+
+
+def _filled(elements: dict) -> dict:
+    """Elements with text. Values are kept exactly as written (only the blank test strips them): the prompt
+    has always printed them unstripped, so stripping would change existing PICOS fingerprints."""
+    return {str(k).strip(): str(v) for k, v in elements.items() if str(v or '').strip()}
+
+
+CRITERIA_KEYS = ('framework', 'elements', 'include', 'exclude')
+
+
+def _criteria_problems(c: dict) -> list[str]:
+    name = _framework(c.get('framework'))
+    if name is None:
+        return [f'criteria.framework must be one of {", ".join(FRAMEWORKS)}']
+    elements = c.get('elements') or {}
+    if not isinstance(elements, dict):
+        return ['criteria.elements should be a section of "label: text" settings']
+    p: list[str] = [f'criteria has an unknown setting "{k}"; use {", ".join(CRITERIA_KEYS)}'
+                    for k in c if k not in CRITERIA_KEYS]
+    for key in ('include', 'exclude'):
+        if any(not isinstance(r, str) or not r.strip() for r in c.get(key) or []):
+            p.append(f'criteria.{key} must be a list of rules, for example: {key}: [Peer-reviewed studies]')
+    labels = FRAMEWORKS[name]['elements']
+    filled = {_label_key(k) for k in _filled(elements)}
+    if labels is not None and name != 'PICOS':   # PICOS may carry extra rows, such as Setting
+        known = {_label_key(label) for label in labels}
+        for k in elements:
+            if _label_key(k) in known:
+                continue
+            if labels:
+                p.append(f'criteria.elements has "{k}", which is not part of {name}; use custom to name your own '
+                         'elements')
+            else:
+                p.append(f'plain criteria have no elements: move "{k}" into include or exclude, or use custom')
+        required = FRAMEWORKS[name]['required']
+        missing = [r for r in required if _label_key(r) not in filled]
+        if missing:
+            p.append(f'{name} needs {", ".join(required[:-1])} and {required[-1]} (missing: {", ".join(missing)})')
+    include = c.get('include') or []
+    if name == 'plain' and isinstance(include, list) and not any(isinstance(r, str) and r.strip() for r in include):
+        p.append('plain criteria need at least one include rule')
+    if name == 'custom' and not filled:   # PICOS may be empty: older projects with no picos section still load
+        p.append('custom criteria need at least one element filled in')
+    return p
+
+
+def _normalise_criteria(c: dict, legacy_rows: list[tuple[str, str]] | None = None) -> dict:
+    """Canonical framework name and labels, framework order, blanks dropped (call after validation).
+
+    `elements` becomes an ordered list of (label, text) rows. An old picos block supplies its own rows,
+    which are kept exactly as written (see _legacy_picos)."""
+    name = _framework(c['framework'])
+    filled = _filled(c.get('elements') or {})
+    labels = FRAMEWORKS[name]['elements']
+    if labels is not None:
+        by_key = {_label_key(k): v for k, v in filled.items()}
+        known = {_label_key(label) for label in labels}
+        extras = {k: v for k, v in filled.items() if _label_key(k) not in known}   # PICOS only (validated)
+        filled = {label: by_key[_label_key(label)] for label in labels if _label_key(label) in by_key} | extras
+    rows = list(legacy_rows) if legacy_rows is not None else list(filled.items())
+    return {'framework': name, 'elements': rows,
+            'include': [r.strip() for r in c.get('include') or []],
+            'exclude': [r.strip() for r in c.get('exclude') or []]}
+
+
 def _problems(raw: dict) -> list[str]:
     p: list[str] = []
     if not str(raw['project'].get('title') or '').strip():
         p.append('project.title is empty')
     if not str(raw.get('question') or '').strip():
         p.append('question is empty: write your research question')
+    kind = raw.get('review_type')
+    if not isinstance(kind, str) or kind not in REVIEW_TYPES:
+        p.append(f'review_type must be one of {", ".join(REVIEW_TYPES)}')
+    p += _criteria_problems(raw['criteria'])
 
     sources = raw.get('sources') or []
     if not sources:
@@ -309,8 +486,10 @@ def load_project(root: Path | str) -> Project:
         raise ConfigError(['project.yaml must be a set of "name: value" settings'])
 
     problems: list[str] = []
-    raw = _merge(DEFAULTS, data, problems)
-    problems += _problems(raw)
+    data, legacy_rows = _legacy_picos(data, problems)
+    raw = _merge(_type_defaults(data), data, problems)
+    shape_problem = any(q.startswith('criteria.include ') for q in problems)   # the default [] was kept
+    problems += [q for q in _problems(raw) if not (shape_problem and q.startswith('plain criteria need'))]
     if problems:
         raise ConfigError(problems)
 
@@ -324,6 +503,7 @@ def load_project(root: Path | str) -> Project:
         g['weight'] = whole_number(g.get('weight', 1))
     if raw['wiki'].get('deep_tiers') is not None:
         raw['wiki']['deep_tiers'] = [whole_number(d) for d in raw['wiki']['deep_tiers']]
+    raw['criteria'] = _normalise_criteria(raw['criteria'], legacy_rows)
 
     tiers = tuple(sorted(
         (Tier(t['id'], str(t['label']).strip(), bool(t.get('included', False)), str(t['definition']).strip())
@@ -335,11 +515,18 @@ def load_project(root: Path | str) -> Project:
     return Project(raw=raw, tiers=tiers, keyword_groups=groups)
 
 
+def _count(n: int, noun: str) -> str:
+    return f'{n} {noun}' + ('' if n == 1 else 's')
+
+
 def summary(project: Project) -> str:
     v = project.validation
     lines = [
         f'Project: {project.title}',
         f'Question: {project.question}',
+        f'Review type: {project.review_noun}',
+        f'Criteria: {project.criteria_name} ({_count(len(project.criteria_elements), "element")}, '
+        f'{_count(len(project.include_rules), "include rule")}, {_count(len(project.exclude_rules), "exclude rule")})',
         '',
         'Sources: ' + ', '.join(project.sources),
         '',

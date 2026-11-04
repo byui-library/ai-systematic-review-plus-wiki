@@ -99,8 +99,13 @@ Append to `log.md` after each paper or task:
 def search_and_screening(project: Project, stats: dict, tier_counts: dict, tools: list[str], dates: list[str],
                          validation: dict | None) -> str:
     sources = ', '.join(f'{name} ({n})' for name, n in stats.get('per_source_raw', {}).items())
-    picos = markdown_table(['Element', 'Criterion'], [[k.replace('_', ' ').capitalize(), v]
-                                               for k, v in project.picos.items() if str(v or '').strip()])
+    criteria = markdown_table(['Element', 'Criterion'], [list(e) for e in project.criteria_elements]) \
+        if project.criteria_elements else ''
+    for title, rules in (('Include', project.include_rules), ('Exclude', project.exclude_rules)):
+        if rules:
+            criteria += f'\n**{title}:**\n\n' + ''.join(f'- {r}\n' for r in rules)
+    criteria = criteria.lstrip('\n')
+    heading = 'Eligibility criteria' + ('' if project.criteria_name == 'eligibility' else f' ({project.criteria_name})')
     groups = markdown_table(['Group', 'Weight', 'Terms'], [[g.name, g.weight, ', '.join(t.strip() for t in g.terms)]
                                                     for g in project.keyword_groups])
     flags = ', '.join(k.replace('_', ' ') for k, v in project.exclude.items() if v) or 'none'
@@ -121,9 +126,9 @@ def search_and_screening(project: Project, stats: dict, tier_counts: dict, tools
 
 {project.question}
 
-## Eligibility criteria (PICOS)
+## {heading}
 
-{picos}
+{criteria}
 ## Records
 
 - {stats.get('total_raw', 0)} records were exported from {len(stats.get('per_source_raw', {}))} source(s): {sources}.
@@ -137,7 +142,7 @@ def search_and_screening(project: Project, stats: dict, tier_counts: dict, tools
 ## AI-assisted screening
 
 Each candidate was assigned to one tier by {', '.join(tools) or 'an AI assistant'} ({when}), using a fixed prompt built
-from the research question, the PICOS criteria, and the tier definitions below. Every decision and its one-sentence
+from the research question, the {project.criteria_name} criteria, and the tier definitions below. Every decision and its one-sentence
 reason is kept in the audit log `data/checkpoint.json`.
 
 {tiers}
