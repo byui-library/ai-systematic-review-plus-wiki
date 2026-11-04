@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -391,11 +392,18 @@ class _RootHints:
         return getattr(self._stream, name)
 
 
+def _shell_quote(root: str, windows: bool) -> str:
+    """Quote a folder so it pastes back unchanged: shlex rules on Mac/Linux, double quotes on Windows when needed."""
+    if not windows:
+        return shlex.quote(root)
+    return f'"{root}"' if any(c in root for c in " &()^;,'`$") else root
+
+
 def _root_for_hints(root: str) -> str | None:
-    """The --root to repeat in hints, as typed (quoted if it has spaces); None for the template folder itself."""
+    """The --root to repeat in hints, quoted for the shell; None for the template folder itself."""
     if Path(root).resolve() == HERE:
         return None
-    return f'"{root}"' if ' ' in root else root
+    return _shell_quote(root, windows=os.name == 'nt')
 
 
 def main(argv: list[str] | None = None) -> int:

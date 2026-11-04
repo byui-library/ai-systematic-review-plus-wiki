@@ -1,3 +1,4 @@
+import pytest
 from review.io import read_json, write_json
 from run import main
 from tests.helpers import TIERS, fill_validation
@@ -60,3 +61,15 @@ def test_hints_never_repeat_a_root_twice(tmp_path, monkeypatch, capsys):
     main(['--root', 'demo-workspace', 'import'])
     out = capsys.readouterr().out
     assert 'py run.py --root demo-workspace prescreen' in out and '--root demo-workspace --root' not in out
+
+
+@pytest.mark.parametrize('root, windows, expected', [
+    ("/tmp/O'Brien", False, "'/tmp/O'\"'\"'Brien'"),
+    ('/tmp/My $HOME Review', False, "'/tmp/My $HOME Review'"),
+    ('/tmp/plain', False, '/tmp/plain'),
+    (r'C:\Reviews\My Review', True, r'"C:\Reviews\My Review"'),
+    (r'C:\Reviews\plain', True, r'C:\Reviews\plain'),
+])
+def test_root_is_quoted_for_the_shell(root, windows, expected):
+    from run import _shell_quote
+    assert _shell_quote(root, windows) == expected
