@@ -1,6 +1,6 @@
 from review import pdfs, report, validate, wiki
 from review.io import read_json
-from run import main
+from run import _root_for_hints, main
 from tests.helpers import TIERS, fill_validation, make_pdf
 
 
@@ -61,7 +61,7 @@ def test_wiki_stage_end_to_end(classified, capsys, monkeypatch):
         assert (paths.wiki / rel).exists(), rel
     capsys.readouterr()
     assert main(root + ['status']) == 0
-    assert 'Next step: py run.py site' in capsys.readouterr().out
+    assert f'Next step: py run.py --root {_root_for_hints(str(paths.root))} site' in capsys.readouterr().out
 
 
 def test_check_with_problems_exits_1(classified, capsys):
