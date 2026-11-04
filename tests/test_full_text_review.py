@@ -128,3 +128,18 @@ def test_empty_status_is_treated_the_same_everywhere(classified):
     row = next(r for r in load_workbook(paths.extraction_xlsx)['All'].iter_rows(values_only=True)
                if r[5] == '10.1000/example.001')
     assert ('| PCA |' in md) == (row[7] == 'PCA')
+
+
+def test_csv_keeps_long_values_whole():
+    from review.excel import csv_safe, excel_safe
+    long = 'x' * 40_000
+    assert len(csv_safe(long)) == 40_000 and len(excel_safe(long)) == 32_000
+
+
+def test_capped_paper_says_what_was_not_read(classified, tmp_path):
+    paths, _ = classified
+    f = tmp_path / 'long.pdf'
+    long_pdf(f, pages=12)
+    task = wiki._hand_out_full_text(paths, read_document(f, max_pages=5))
+    assert task['complete'] is False
+    assert 'Only pages 1-5 of 12' in task['note'] and 'nothing is cut' not in task['note']

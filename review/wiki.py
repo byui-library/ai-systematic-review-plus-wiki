@@ -366,13 +366,19 @@ def _hand_out_full_text(paths: Paths, document) -> dict:
         texts.append(text)
         parts.append({'file': target.relative_to(paths.root).as_posix(),
                       'pages': f'{group[0][0].number}-{group[-1][0].number}', 'characters': len(text)})
-    notes = [] if len(parts) == 1 else [f'Long paper: read all {len(parts)} part files in order; nothing is cut.']
+    complete = len(document.pages) == document.total
+    notes = []
+    if len(parts) > 1:
+        notes.append(f'Long paper: read all {len(parts)} part files in order' + ('; nothing is cut.' if complete else '.'))
+    if not complete:
+        notes.append(f'Only pages 1-{len(document.pages)} of {document.total} were read (the page limit). Tell the '
+                     'researcher the rest of the paper was not read.')
     blanks = blank_pages(document.pages)
     if blanks:
         notes.append(f'{blanks} page(s) have no text layer (images or scanned pages); tell the researcher if they '
                      'seem to hold results.')
     return {'source': 'pdf', 'parts': parts, 'pages': document.total,
-            'complete': len(document.pages) == document.total,
+            'complete': complete,
             'tables': sum(len(p.tables) for p in document.pages), 'scanned': False,
             'text': texts[0] if len(parts) == 1 else None, 'note': ' '.join(notes)}
 
