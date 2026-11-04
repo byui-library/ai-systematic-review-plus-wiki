@@ -41,29 +41,44 @@ def test_prisma_only_when_enabled(classified):
     assert paths.prisma_png.stat().st_size > 1000
 
 
-@pytest.mark.parametrize('n_sources', [1, 5])
-def test_prisma_arrows_join_the_boxes(classified, monkeypatch, n_sources):
-    """The boxes grow with one line per database, so the arrows must follow their real edges, not a fixed size."""
+@pytest.mark.parametrize('n_sources, long_tiers', [(1, False), (5, False), (8, True)])
+def test_prisma_boxes_never_collide(classified, monkeypatch, n_sources, long_tiers):
+    """Boxes grow with one line per database and per tier: they must stack without touching each other or the
+    title, and every arrow must be anchored to the boxes it joins."""
     import matplotlib.pyplot as plt
     paths, project = classified
-    figures = []
+    if long_tiers:   # six tiers with long names: the included and excluded boxes get tall and would get wide
+        data = yaml.safe_load(paths.project_yaml.read_text(encoding='utf-8'))
+        data['tiers'] = [{'id': i, 'label': f'Tier {i} with a rather long descriptive label', 'included': i <= 3,
+                          'definition': 'x'} for i in range(1, 7)]
+        paths.project_yaml.write_text(yaml.safe_dump(data), encoding='utf-8')
+        project = load_project(paths.root)
+    close, figures = plt.close, []
     monkeypatch.setattr(plt, 'close', figures.append)
-    sources = dict(list({'pubmed': 400, 'wos': 300, 'ebsco': 200, 'ris': 100, 'csv': 50}.items())[:n_sources])
-    report.build_prisma(paths, project, {'per_source_raw': sources}, report.collect(paths, project))
-    figures[0].canvas.draw()   # measure at screen resolution again after the 200-dpi save
-    ax = figures[0].axes[0]
-    boxes = sorted((report._data_extent(ax, t) for t in ax.texts if t.get_bbox_patch() is not None),
-                   key=lambda e: -e[3])
-    main = [e for e in boxes if e[0] < 3 < e[2]]
-    side = [e for e in boxes if e[0] > 3]
-    arrows = [a for a in ax.texts if hasattr(a, 'xyann')]
-    down = sorted((a for a in arrows if a.xy[0] == a.xyann[0]), key=lambda a: -a.xy[1])
-    across = sorted((a for a in arrows if a.xy[1] == a.xyann[1]), key=lambda a: -a.xy[1])
-    assert len(down) == len(main) - 1 == len(across) == len(side)
-    for i, arrow in enumerate(down):
-        assert arrow.xyann[1] == pytest.approx(main[i][1]) and arrow.xy[1] == pytest.approx(main[i + 1][3])
-    for arrow, box in zip(across, side):
-        assert arrow.xy[0] == pytest.approx(box[0])
+    records = {'included': [{'tier': t.id} for t in project.tiers if t.included],
+               'excluded': [{'tier': t.id} for t in project.tiers if not t.included]}
+    report.build_prisma(paths, project, {'per_source_raw': {f'db{i}': i for i in range(n_sources)}}, records)
+    fig = figures[0]
+    try:
+        fig.canvas.draw()
+        ax = fig.axes[0]
+        title = next(t for t in ax.texts if t.get_text() == project.flow_title).get_window_extent()
+        patches = [t.get_bbox_patch() for t in ax.texts if t.get_bbox_patch() is not None]
+        centre = ax.get_window_extent().x0 + ax.get_window_extent().width / 2
+        main = sorted((p for p in patches if p.get_window_extent().x1 < centre), key=lambda p: -p.get_window_extent().y1)
+        side = sorted((p for p in patches if p.get_window_extent().x0 > centre), key=lambda p: -p.get_window_extent().y1)
+        assert len(main) == 5 and len(side) == 4
+        assert title.y0 > main[0].get_window_extent().y1
+        for i, s in enumerate(side):
+            upper, lower, box = (main[i].get_window_extent(), main[i + 1].get_window_extent(), s.get_window_extent())
+            assert upper.y0 > box.y1 > box.y0 > lower.y1   # beside the gap between the two boxes it comes from
+        arrows = [a for a in ax.texts if hasattr(a, 'arrow_patch') and a.arrow_patch is not None]
+        down = [a for a in arrows if a.xycoords in main]
+        assert [(main.index(a.anncoords), main.index(a.xycoords)) for a in down] == [(i, i + 1) for i in range(4)]
+        assert sorted(side.index(a.xycoords) for a in arrows if a.xycoords in side) == [0, 1, 2, 3]
+        assert all(a.arrow_patch.shrinkA == a.arrow_patch.shrinkB == 0 for a in arrows)
+    finally:
+        close(fig)
 
 
 def test_validation_sheet_after_scoring(classified):

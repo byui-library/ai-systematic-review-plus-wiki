@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import textwrap
 from collections import Counter
 from datetime import date
 
@@ -108,11 +109,14 @@ def build_excel(paths: Paths, project: Project, stats: dict, data: dict, validat
     save_workbook(wb, paths.results_xlsx)
 
 
-def _data_extent(ax, text) -> tuple[float, float, float, float]:
-    """(left, bottom, right, top) of a drawn text's box, in the axes' data units."""
-    box = text.get_bbox_patch().get_window_extent()
-    (x0, y0), (x1, y1) = ax.transData.inverted().transform([(box.x0, box.y0), (box.x1, box.y1)])
-    return x0, y0, x1, y1
+def _wrap(text: str, width: int) -> str:
+    """Wrap each line, so a long tier label cannot widen a box into its neighbour."""
+    return '\n'.join(textwrap.fill(line, width) or line for line in text.split('\n'))
+
+
+def _box_height(text: str, fontsize: float, pad: float) -> float:
+    """Height of a text box in inches (one data unit is one inch): lines at 1.2 spacing plus the padding."""
+    return (text.count('\n') + 1) * fontsize * 1.2 / 72 + 2 * pad * fontsize / 72
 
 
 def build_prisma(paths: Paths, project: Project, stats: dict, data: dict) -> None:
@@ -138,25 +142,37 @@ def build_prisma(paths: Paths, project: Project, stats: dict, data: dict) -> Non
         f"Excluded by AI screening\n(n = {len(data['excluded'])})\n"
         + '\n'.join(f'{t.label}: {exc.get(t.id, 0)}' for t in project.tiers if not t.included),
     ]
-    fig, ax = plt.subplots(figsize=(10, 12))
+    left = [_wrap(t, 30) for t in left]
+    right = [_wrap(t, 32) for t in right]
+
+    # Stack the boxes from the top by their line counts (one line per database and per tier), so a tall box
+    # pushes the rest down instead of running into its neighbours or the title. The figure grows to fit.
+    heights = [_box_height(t, 10, 0.6) for t in left]
+    gaps = [max(1.2, _box_height(t, 9, 0.5) + 0.5) for t in right]
+    ys, y = [], -0.7   # below the title
+    for i, h in enumerate(heights):
+        ys.append(y - h / 2)
+        y -= h + (gaps[i] if i < len(gaps) else 0)
+    total = -y + 0.2
+    fig, ax = plt.subplots(figsize=(10, total))
+    fig.subplots_adjust(0, 0, 1, 1)
     ax.set_xlim(0, 10)
-    ax.set_ylim(0, 12)
+    ax.set_ylim(-total, 0)
     ax.axis('off')
-    ys = [10.6, 8.3, 6.2, 4.1, 1.6]
+    ax.text(5, -0.3, project.flow_title, ha='center', va='center', fontsize=13, fontweight='bold')
     main_box = dict(boxstyle='round,pad=0.6', fc='#E8F0FB', ec='#1F4E79')
     side_box = dict(boxstyle='round,pad=0.5', fc='#F5F5F5', ec='#999999')
-    boxes = [ax.text(3, y, text, ha='center', va='center', fontsize=10, bbox=main_box) for y, text in zip(ys, left)]
-    fig.canvas.draw()   # boxes grow with their lines (one per database, one per tier), so measure them
-    edges = [_data_extent(ax, b) for b in boxes]
-    for i, text in enumerate(right):
-        bottom, top = edges[i][1], edges[i + 1][3]
-        mid = (bottom + top) / 2
-        ax.annotate('', xy=(3, top), xytext=(3, bottom), arrowprops=dict(arrowstyle='->', color='#1F4E79'))
-        side = ax.text(7.7, mid, text, ha='center', va='center', fontsize=9, bbox=side_box)
-        fig.canvas.draw()
-        ax.annotate('', xy=(_data_extent(ax, side)[0], mid), xytext=(3, mid),
+    boxes = [ax.text(3, y, t, ha='center', va='center', fontsize=10, bbox=main_box).get_bbox_patch()
+             for y, t in zip(ys, left)]
+    for i, t in enumerate(right):
+        mid = (ys[i] - heights[i] / 2 + ys[i + 1] + heights[i + 1] / 2) / 2
+        side = ax.text(7.7, mid, t, ha='center', va='center', fontsize=9, bbox=side_box).get_bbox_patch()
+        # Arrows are anchored to the boxes themselves (fractions of each box), so matplotlib places their ends
+        # on the real edges at whatever resolution it draws.
+        ax.annotate('', xy=(0.5, 1), xycoords=boxes[i + 1], xytext=(0.5, 0), textcoords=boxes[i],
+                    arrowprops=dict(arrowstyle='->', color='#1F4E79', shrinkA=0, shrinkB=0))
+        ax.annotate('', xy=(0, 0.5), xycoords=side, xytext=(3, 0.5), textcoords=('data', side),
                     arrowprops=dict(arrowstyle='->', color='#999999', shrinkA=0, shrinkB=0))
-    ax.text(5, 11.9, project.flow_title, ha='center', va='center', fontsize=13, fontweight='bold')
     fig.savefig(paths.prisma_png, dpi=200, bbox_inches='tight')
     plt.close(fig)
 
