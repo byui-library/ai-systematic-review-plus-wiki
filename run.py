@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -322,7 +323,7 @@ def cmd_demo(args, paths: Paths) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='run.py', description='AI-assisted systematic review pipeline.')
-    parser.add_argument('--root', default=str(Path(__file__).resolve().parent),
+    parser.add_argument('--root', default=str(HERE),
                         help='project folder (default: the folder containing run.py)')
     sub = parser.add_subparsers()
     sub.add_parser('status', help='show progress and the next step').set_defaults(func=cmd_status)
@@ -373,6 +374,30 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+HERE = Path(__file__).resolve().parent
+_HINT = re.compile(r'py run\.py (?!--root )')
+
+
+class _RootHints:
+    """Wraps stdout/stderr so every `py run.py …` hint includes the --root the user gave, ready to copy."""
+
+    def __init__(self, stream, root: str):
+        self._stream, self._prefix = stream, f'py run.py --root {root} '
+
+    def write(self, text: str) -> int:
+        return self._stream.write(_HINT.sub(lambda _: self._prefix, text))   # a function: Windows paths have backslashes
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def _root_for_hints(root: str) -> str | None:
+    """The --root to repeat in hints, as typed (quoted if it has spaces); None for the template folder itself."""
+    if Path(root).resolve() == HERE:
+        return None
+    return f'"{root}"' if ' ' in root else root
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         try:   # Windows consoles default to cp1252; titles often contain non-ASCII characters
@@ -381,6 +406,10 @@ def main(argv: list[str] | None = None) -> int:
             pass
     args = build_parser().parse_args(argv)
     paths = Paths(Path(args.root))
+    streams = sys.stdout, sys.stderr
+    hint_root = _root_for_hints(args.root)
+    if hint_root:
+        sys.stdout, sys.stderr = (_RootHints(stream, hint_root) for stream in streams)
     try:
         getattr(args, 'func', cmd_status)(args, paths)
     except PipelineError as err:
@@ -389,6 +418,8 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print('\nStopped (Ctrl+C). Saved work is kept; run the command again to carry on.', file=sys.stderr)
         return 130
+    finally:
+        sys.stdout, sys.stderr = streams
     return 0
 
 

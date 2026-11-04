@@ -27,7 +27,7 @@ def test_full_core_pipeline(workspace, capsys):
 
     capsys.readouterr()
     assert main(root + ['status']) == 0
-    assert 'Next step: py run.py pdfs' in capsys.readouterr().out
+    assert f'Next step: py run.py --root {workspace.root} pdfs' in capsys.readouterr().out
 
 
 def test_problem_exits_1_with_friendly_message(tmp_path, capsys):
@@ -38,3 +38,25 @@ def test_problem_exits_1_with_friendly_message(tmp_path, capsys):
 def test_no_command_shows_status(workspace, capsys):
     assert main(['--root', str(workspace.root)]) == 0
     assert 'Review pipeline status' in capsys.readouterr().out
+
+
+def test_hints_repeat_the_root_the_user_gave(tmp_path, monkeypatch, capsys):
+    folder = tmp_path / 'My Review'
+    folder.mkdir()
+    main(['--root', str(folder), 'status'])
+    out = capsys.readouterr().out
+    assert f'py run.py --root "{folder}" ' in out and 'py run.py import' not in out
+
+
+def test_hints_are_unchanged_for_the_template_folder(capsys):
+    import run
+    main(['--root', str(run.HERE), 'status'])
+    assert '--root' not in capsys.readouterr().out
+
+
+def test_hints_never_repeat_a_root_twice(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    main(['demo'])
+    main(['--root', 'demo-workspace', 'import'])
+    out = capsys.readouterr().out
+    assert 'py run.py --root demo-workspace prescreen' in out and '--root demo-workspace --root' not in out

@@ -61,7 +61,7 @@ def test_wiki_stage_end_to_end(classified, capsys, monkeypatch):
         assert (paths.wiki / rel).exists(), rel
     capsys.readouterr()
     assert main(root + ['status']) == 0
-    assert 'Next step: py run.py site' in capsys.readouterr().out
+    assert f'Next step: py run.py --root {paths.root} site' in capsys.readouterr().out
 
 
 def test_check_with_problems_exits_1(classified, capsys):
