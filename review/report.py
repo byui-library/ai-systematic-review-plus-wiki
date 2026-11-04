@@ -146,6 +146,7 @@ def build_prisma(paths: Paths, project: Project, stats: dict, data: dict) -> Non
                         arrowprops=dict(arrowstyle='->', color='#1F4E79'))
             ax.annotate('', xy=(5.6, mid), xytext=(3, mid), arrowprops=dict(arrowstyle='->', color='#999999'))
             ax.text(7.7, mid, right[i], ha='center', va='center', fontsize=9, bbox=side_box)
+    fig.suptitle(project.flow_title, fontsize=13, fontweight='bold')
     fig.savefig(paths.prisma_png, dpi=200, bbox_inches='tight')
     plt.close(fig)
 
