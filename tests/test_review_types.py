@@ -204,6 +204,7 @@ LEGACY_KEYS = ('population', 'intervention_or_exposure', 'comparison', 'outcomes
     {'population': 'Athletes', 'setting': 'Elite clubs', 'time_frame': '2000 onward'},   # extra rows
     {'population': 'Athletes', 'Population': 'Adults'},                 # keys that differ only in case
     {'Outcomes': 'Load', 'population': 'Athletes', 'study_design': 'Cohort'},   # a capitalised key stays last
+    {'population': 'Athletes', 'İl_bölgesi': 'Ankara', 'ǰ_ΐ': 'x'},     # non-ASCII keys whose case rules are odd
     {},                                                                  # an empty picos section
     None,                                                                # no picos section at all
 ])
@@ -215,6 +216,23 @@ def test_legacy_picos_prompt_is_unchanged(tmp_path, picos):
         data['picos'] = picos
     (tmp_path / 'project.yaml').write_text(yaml.safe_dump(data, sort_keys=False), encoding='utf-8')
     assert _legacy_prompt(picos) + 'TIERS:' in build_prompt(load_project(tmp_path))
+
+
+def test_legacy_picos_block_literal(tmp_path):
+    """One block written out by hand from the pre-review-types prompt, so the helper above cannot drift with it."""
+    write_project(tmp_path, picos={'population': 'Athletes', 'setting': 'Elite clubs', 'comparison': ''})
+    assert ('PICOS CRITERIA:\n'
+            '  Population                : Athletes\n'
+            '  Setting                   : Elite clubs\n'
+            '\nTIERS:') in build_prompt(load_project(tmp_path))
+
+
+def test_empty_criteria_next_to_legacy_picos_is_fine(tmp_path):
+    write_project(tmp_path, picos={'population': 'Athletes'})
+    with (tmp_path / 'project.yaml').open('a', encoding='utf-8') as f:
+        f.write('criteria:\n')   # a blank section left over from copying the new example file
+    project = load_project(tmp_path)
+    assert project.framework == 'PICOS' and project.criteria_elements == [('Population', 'Athletes')]
 
 
 def test_empty_picos_next_to_criteria_is_fine(tmp_path):

@@ -162,8 +162,7 @@ class Project:
 
     @property
     def criteria_elements(self) -> list[tuple[str, str]]:
-        rows = self.raw['criteria'].get('legacy_rows')   # an old picos block, kept exactly as written
-        return list(rows) if rows is not None else list(self.raw['criteria']['elements'].items())
+        return list(self.raw['criteria']['elements'])
 
     @property
     def include_rules(self) -> list[str]:
@@ -305,7 +304,7 @@ def _legacy_picos(data: dict, problems: list[str]) -> tuple[dict, list[tuple[str
     picos = data.pop('picos')
     if not picos:   # an empty `picos:` left behind is harmless
         return data, None
-    if 'criteria' in data:
+    if data.get('criteria'):   # an empty `criteria:` line next to it is harmless too
         problems.append('project.yaml has both picos and criteria: keep criteria and delete the picos section')
         return data, None
     if not isinstance(picos, dict):
@@ -313,9 +312,12 @@ def _legacy_picos(data: dict, problems: list[str]) -> tuple[dict, list[tuple[str
         return data, None
     # Extra keys (for example `setting:`) were always accepted and screened on, so they stay as extra PICOS rows.
     order = [k for k in LEGACY_PICOS if k in picos] + [k for k in picos if k not in LEGACY_PICOS]
-    rows = [(LEGACY_PICOS.get(k, str(k).replace('_', ' ').capitalize()), str(picos[k]))
+    # Other keys keep their own spelling (only `_` becomes a space): the prompt title-cases labels, which then
+    # gives exactly the old `key.replace('_', ' ').title()`, even for non-ASCII keys.
+    rows = [(LEGACY_PICOS.get(k, str(k).replace('_', ' ')), str(picos[k]))
             for k in order if str(picos[k] or '').strip()]
-    data['criteria'] = {'framework': 'PICOS', 'elements': dict(rows)}   # for validation; the rows are kept apart
+    # PICOS validation checks only the shape, so a collapsed copy is enough; the rows themselves are kept.
+    data['criteria'] = {'framework': 'PICOS', 'elements': dict(rows)}
     return data, rows
 
 
@@ -371,8 +373,11 @@ def _criteria_problems(c: dict) -> list[str]:
     return p
 
 
-def _normalise_criteria(c: dict) -> dict:
-    """Canonical framework name and labels, framework order, blanks dropped (call after validation)."""
+def _normalise_criteria(c: dict, legacy_rows: list[tuple[str, str]] | None = None) -> dict:
+    """Canonical framework name and labels, framework order, blanks dropped (call after validation).
+
+    `elements` becomes an ordered list of (label, text) rows. An old picos block supplies its own rows,
+    which are kept exactly as written (see _legacy_picos)."""
     name = _framework(c['framework'])
     filled = _filled(c.get('elements') or {})
     labels = FRAMEWORKS[name]['elements']
@@ -381,7 +386,8 @@ def _normalise_criteria(c: dict) -> dict:
         known = {_label_key(label) for label in labels}
         extras = {k: v for k, v in filled.items() if _label_key(k) not in known}   # PICOS only (validated)
         filled = {label: by_key[_label_key(label)] for label in labels if _label_key(label) in by_key} | extras
-    return {'framework': name, 'elements': filled,
+    rows = list(legacy_rows) if legacy_rows is not None else list(filled.items())
+    return {'framework': name, 'elements': rows,
             'include': [r.strip() for r in c.get('include') or []],
             'exclude': [r.strip() for r in c.get('exclude') or []]}
 
@@ -497,9 +503,7 @@ def load_project(root: Path | str) -> Project:
         g['weight'] = whole_number(g.get('weight', 1))
     if raw['wiki'].get('deep_tiers') is not None:
         raw['wiki']['deep_tiers'] = [whole_number(d) for d in raw['wiki']['deep_tiers']]
-    raw['criteria'] = _normalise_criteria(raw['criteria'])
-    if legacy_rows is not None:
-        raw['criteria']['legacy_rows'] = legacy_rows
+    raw['criteria'] = _normalise_criteria(raw['criteria'], legacy_rows)
 
     tiers = tuple(sorted(
         (Tier(t['id'], str(t['label']).strip(), bool(t.get('included', False)), str(t['definition']).strip())
