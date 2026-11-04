@@ -41,6 +41,31 @@ def test_prisma_only_when_enabled(classified):
     assert paths.prisma_png.stat().st_size > 1000
 
 
+@pytest.mark.parametrize('n_sources', [1, 5])
+def test_prisma_arrows_join_the_boxes(classified, monkeypatch, n_sources):
+    """The boxes grow with one line per database, so the arrows must follow their real edges, not a fixed size."""
+    import matplotlib.pyplot as plt
+    paths, project = classified
+    figures = []
+    monkeypatch.setattr(plt, 'close', figures.append)
+    sources = dict(list({'pubmed': 400, 'wos': 300, 'ebsco': 200, 'ris': 100, 'csv': 50}.items())[:n_sources])
+    report.build_prisma(paths, project, {'per_source_raw': sources}, report.collect(paths, project))
+    figures[0].canvas.draw()   # measure at screen resolution again after the 200-dpi save
+    ax = figures[0].axes[0]
+    boxes = sorted((report._data_extent(ax, t) for t in ax.texts if t.get_bbox_patch() is not None),
+                   key=lambda e: -e[3])
+    main = [e for e in boxes if e[0] < 3 < e[2]]
+    side = [e for e in boxes if e[0] > 3]
+    arrows = [a for a in ax.texts if hasattr(a, 'xyann')]
+    down = sorted((a for a in arrows if a.xy[0] == a.xyann[0]), key=lambda a: -a.xy[1])
+    across = sorted((a for a in arrows if a.xy[1] == a.xyann[1]), key=lambda a: -a.xy[1])
+    assert len(down) == len(main) - 1 == len(across) == len(side)
+    for i, arrow in enumerate(down):
+        assert arrow.xyann[1] == pytest.approx(main[i][1]) and arrow.xy[1] == pytest.approx(main[i + 1][3])
+    for arrow, box in zip(across, side):
+        assert arrow.xy[0] == pytest.approx(box[0])
+
+
 def test_validation_sheet_after_scoring(classified):
     paths, project = classified
     validate.draw_sample(paths, project)

@@ -108,6 +108,13 @@ def build_excel(paths: Paths, project: Project, stats: dict, data: dict, validat
     save_workbook(wb, paths.results_xlsx)
 
 
+def _data_extent(ax, text) -> tuple[float, float, float, float]:
+    """(left, bottom, right, top) of a drawn text's box, in the axes' data units."""
+    box = text.get_bbox_patch().get_window_extent()
+    (x0, y0), (x1, y1) = ax.transData.inverted().transform([(box.x0, box.y0), (box.x1, box.y1)])
+    return x0, y0, x1, y1
+
+
 def build_prisma(paths: Paths, project: Project, stats: dict, data: dict) -> None:
     import matplotlib
     matplotlib.use('Agg')
@@ -138,14 +145,17 @@ def build_prisma(paths: Paths, project: Project, stats: dict, data: dict) -> Non
     ys = [10.6, 8.3, 6.2, 4.1, 1.6]
     main_box = dict(boxstyle='round,pad=0.6', fc='#E8F0FB', ec='#1F4E79')
     side_box = dict(boxstyle='round,pad=0.5', fc='#F5F5F5', ec='#999999')
-    for i, (y, text) in enumerate(zip(ys, left)):
-        ax.text(3, y, text, ha='center', va='center', fontsize=10, bbox=main_box)
-        if i < len(right):
-            mid = (y + ys[i + 1]) / 2
-            ax.annotate('', xy=(3, ys[i + 1] + 0.75), xytext=(3, y - 0.75),
-                        arrowprops=dict(arrowstyle='->', color='#1F4E79'))
-            ax.annotate('', xy=(5.6, mid), xytext=(3, mid), arrowprops=dict(arrowstyle='->', color='#999999'))
-            ax.text(7.7, mid, right[i], ha='center', va='center', fontsize=9, bbox=side_box)
+    boxes = [ax.text(3, y, text, ha='center', va='center', fontsize=10, bbox=main_box) for y, text in zip(ys, left)]
+    fig.canvas.draw()   # boxes grow with their lines (one per database, one per tier), so measure them
+    edges = [_data_extent(ax, b) for b in boxes]
+    for i, text in enumerate(right):
+        bottom, top = edges[i][1], edges[i + 1][3]
+        mid = (bottom + top) / 2
+        ax.annotate('', xy=(3, top), xytext=(3, bottom), arrowprops=dict(arrowstyle='->', color='#1F4E79'))
+        side = ax.text(7.7, mid, text, ha='center', va='center', fontsize=9, bbox=side_box)
+        fig.canvas.draw()
+        ax.annotate('', xy=(_data_extent(ax, side)[0], mid), xytext=(3, mid),
+                    arrowprops=dict(arrowstyle='->', color='#999999', shrinkA=0, shrinkB=0))
     ax.text(5, 11.9, project.flow_title, ha='center', va='center', fontsize=13, fontweight='bold')
     fig.savefig(paths.prisma_png, dpi=200, bbox_inches='tight')
     plt.close(fig)
