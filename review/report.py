@@ -110,13 +110,16 @@ def build_excel(paths: Paths, project: Project, stats: dict, data: dict, validat
 
 
 def _wrap(text: str, width: int) -> str:
-    """Wrap each line, so a long tier label cannot widen a box into its neighbour."""
-    return '\n'.join(textwrap.fill(line, width) or line for line in text.split('\n'))
-
-
-def _box_height(text: str, fontsize: float, pad: float) -> float:
-    """Height of a text box in inches (one data unit is one inch): lines at 1.2 spacing plus the padding."""
-    return (text.count('\n') + 1) * fontsize * 1.2 / 72 + 2 * pad * fontsize / 72
+    """Wrap long lines so one long tier label cannot make a box very wide. A count stays with its label."""
+    out = []
+    for line in text.split('\n'):
+        label, sep, count = line.rpartition(': ')
+        if sep and count.isdigit():
+            wrapped = textwrap.wrap(label, max(width - len(sep + count), 10)) or ['']
+            out.append('\n'.join(wrapped[:-1] + [wrapped[-1] + sep + count]))
+        else:
+            out.append(textwrap.fill(line, width) or line)
+    return '\n'.join(out)
 
 
 def build_prisma(paths: Paths, project: Project, stats: dict, data: dict) -> None:
@@ -126,52 +129,72 @@ def build_prisma(paths: Paths, project: Project, stats: dict, data: dict) -> Non
 
     inc = Counter(r['tier'] for r in data['included'])
     exc = Counter(r['tier'] for r in data['excluded'])
-    sources = '\n'.join(f'{s}: {n}' for s, n in stats.get('per_source_raw', {}).items())
+    sources = ''.join(f'\n{s}: {n}' for s, n in stats.get('per_source_raw', {}).items())
     left = [
-        f"Records identified\n(n = {stats.get('total_raw', 0)})\n{sources}",
+        f"Records identified\n(n = {stats.get('total_raw', 0)}){sources}",
         f"Unique records screened\n(n = {stats.get('unique', 0)})",
         f"Records passing filters\n(n = {stats.get('after_prefilter', 0)})",
         f"Records screened by AI\n(n = {len(data['included']) + len(data['excluded'])})",
-        f"Studies included\n(n = {len(data['included'])})\n"
-        + '\n'.join(f'{t.label}: {inc.get(t.id, 0)}' for t in project.tiers if t.included),
+        f"Studies included\n(n = {len(data['included'])})"
+        + ''.join(f'\n{t.label}: {inc.get(t.id, 0)}' for t in project.tiers if t.included),
     ]
     right = [
         f"Duplicates removed\n(n = {stats.get('duplicates_removed', 0)})",
         f"Excluded by type, language,\nor missing abstract\n(n = {stats.get('prefilter_excluded', 0)})",
         f"Excluded by keyword prescreen\n(n = {stats.get('prescreen_excluded', 0)})",
-        f"Excluded by AI screening\n(n = {len(data['excluded'])})\n"
-        + '\n'.join(f'{t.label}: {exc.get(t.id, 0)}' for t in project.tiers if not t.included),
+        f"Excluded by AI screening\n(n = {len(data['excluded'])})"
+        + ''.join(f'\n{t.label}: {exc.get(t.id, 0)}' for t in project.tiers if not t.included),
     ]
-    left = [_wrap(t, 30) for t in left]
-    right = [_wrap(t, 32) for t in right]
 
-    # Stack the boxes from the top by their line counts (one line per database and per tier), so a tall box
-    # pushes the rest down instead of running into its neighbours or the title. The figure grows to fit.
-    heights = [_box_height(t, 10, 0.6) for t in left]
-    gaps = [max(1.2, _box_height(t, 9, 0.5) + 0.5) for t in right]
-    ys, y = [], -0.7   # below the title
-    for i, h in enumerate(heights):
-        ys.append(y - h / 2)
-        y -= h + (gaps[i] if i < len(gaps) else 0)
-    total = -y + 0.2
-    fig, ax = plt.subplots(figsize=(10, total))
+    fig, ax = plt.subplots()
     fig.subplots_adjust(0, 0, 1, 1)
-    ax.set_xlim(0, 10)
-    ax.set_ylim(-total, 0)
     ax.axis('off')
-    ax.text(5, -0.3, project.flow_title, ha='center', va='center', fontsize=13, fontweight='bold')
-    main_box = dict(boxstyle='round,pad=0.6', fc='#E8F0FB', ec='#1F4E79')
-    side_box = dict(boxstyle='round,pad=0.5', fc='#F5F5F5', ec='#999999')
-    boxes = [ax.text(3, y, t, ha='center', va='center', fontsize=10, bbox=main_box).get_bbox_patch()
-             for y, t in zip(ys, left)]
-    for i, t in enumerate(right):
-        mid = (ys[i] - heights[i] / 2 + ys[i + 1] + heights[i + 1] / 2) / 2
-        side = ax.text(7.7, mid, t, ha='center', va='center', fontsize=9, bbox=side_box).get_bbox_patch()
-        # Arrows are anchored to the boxes themselves (fractions of each box), so matplotlib places their ends
-        # on the real edges at whatever resolution it draws.
-        ax.annotate('', xy=(0.5, 1), xycoords=boxes[i + 1], xytext=(0.5, 0), textcoords=boxes[i],
+    title = ax.text(0, 0, project.flow_title, ha='center', va='center', fontsize=13, fontweight='bold')
+    main_style = dict(boxstyle='round,pad=0.6', fc='#E8F0FB', ec='#1F4E79')
+    side_style = dict(boxstyle='round,pad=0.5', fc='#F5F5F5', ec='#999999')
+    mains = [ax.text(0, 0, _wrap(t, 30), ha='center', va='center', fontsize=10, bbox=main_style) for t in left]
+    sides = [ax.text(0, 0, _wrap(t, 32), ha='center', va='center', fontsize=9, bbox=side_style) for t in right]
+
+    # Draw once to measure every box (they grow with one line per database and per tier), then place them.
+    # One data unit is one inch, so the measurements are positions.
+    fig.canvas.draw()
+
+    def size(artist):
+        box = artist.get_window_extent()
+        return box.width / fig.dpi, box.height / fig.dpi
+
+    main_sizes = [size(t.get_bbox_patch()) for t in mains]
+    side_sizes = [size(t.get_bbox_patch()) for t in sides]
+    main_w = max(w for w, _ in main_sizes)
+    side_w = max(w for w, _ in side_sizes)
+    main_x = 0.3 + main_w / 2
+    side_x = main_x + main_w / 2 + 1.5 + side_w / 2
+    width = max(side_x + side_w / 2 + 0.3, size(title)[0] + 0.6)
+
+    y = -(size(title)[1] + 0.5)   # top of the first box, below the title
+    tops = []
+    for i, (_, h) in enumerate(main_sizes):
+        tops.append(y)
+        mains[i].set_position((main_x, y - h / 2))
+        if i < len(sides):
+            gap = max(1.0, side_sizes[i][1] + 0.5)
+            sides[i].set_position((side_x, y - h - gap / 2))
+            y -= h + gap
+        else:
+            y -= h
+    height = -y + 0.3
+    title.set_position((width / 2, -(size(title)[1] / 2 + 0.2)))
+    fig.set_size_inches(width, height)
+    ax.set_xlim(0, width)
+    ax.set_ylim(-height, 0)
+
+    # Arrows are anchored to the boxes themselves (fractions of each box), so their ends sit on the real edges
+    # at whatever resolution the chart is saved.
+    for i, side in enumerate(sides):
+        upper, lower, patch = mains[i].get_bbox_patch(), mains[i + 1].get_bbox_patch(), side.get_bbox_patch()
+        ax.annotate('', xy=(0.5, 1), xycoords=lower, xytext=(0.5, 0), textcoords=upper,
                     arrowprops=dict(arrowstyle='->', color='#1F4E79', shrinkA=0, shrinkB=0))
-        ax.annotate('', xy=(0, 0.5), xycoords=side, xytext=(3, 0.5), textcoords=('data', side),
+        ax.annotate('', xy=(0, 0.5), xycoords=patch, xytext=(main_x, 0.5), textcoords=('data', patch),
                     arrowprops=dict(arrowstyle='->', color='#999999', shrinkA=0, shrinkB=0))
     fig.savefig(paths.prisma_png, dpi=200, bbox_inches='tight')
     plt.close(fig)
