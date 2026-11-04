@@ -63,7 +63,10 @@ Framework element labels:
 (`time_frame` becomes `Time frame`), because older files screened on those rows. Values are kept unstripped
 for the same reason. If both a non-empty `picos:` and `criteria:` are present, `check-config` reports it and
 asks for one. (Revised after code review: the first draft rejected extra keys and empty PICOS, which would
-have stopped older projects from loading.)
+have stopped older projects from loading.) The legacy rows are kept exactly as the old prompt printed them,
+in its order (the five standard keys, then the others in file order), and they are never merged or reordered.
+Keys that differ only in case (`population`, `Population`) stay two rows, and a capitalised `Outcomes:` stays
+an extra row at the end. (Revised after the Copilot review.)
 
 **Validation (`check-config`)**, in plain English, for example:
 - `review_type must be one of systematic, scoping, qualitative, collection, methods`

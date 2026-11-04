@@ -202,6 +202,8 @@ LEGACY_KEYS = ('population', 'intervention_or_exposure', 'comparison', 'outcomes
 @pytest.mark.parametrize('picos', [
     {'population': 'Athletes\n', 'outcomes': 'Load  '},                  # block scalars and trailing spaces
     {'population': 'Athletes', 'setting': 'Elite clubs', 'time_frame': '2000 onward'},   # extra rows
+    {'population': 'Athletes', 'Population': 'Adults'},                 # keys that differ only in case
+    {'Outcomes': 'Load', 'population': 'Athletes', 'study_design': 'Cohort'},   # a capitalised key stays last
     {},                                                                  # an empty picos section
     None,                                                                # no picos section at all
 ])

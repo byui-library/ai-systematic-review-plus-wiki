@@ -162,7 +162,8 @@ class Project:
 
     @property
     def criteria_elements(self) -> list[tuple[str, str]]:
-        return list(self.raw['criteria']['elements'].items())
+        rows = self.raw['criteria'].get('legacy_rows')   # an old picos block, kept exactly as written
+        return list(rows) if rows is not None else list(self.raw['criteria']['elements'].items())
 
     @property
     def include_rules(self) -> list[str]:
@@ -291,24 +292,31 @@ def _review_type(data: dict) -> str:
     return kind if isinstance(kind, str) and kind in REVIEW_TYPES else 'systematic'
 
 
-def _legacy_picos(data: dict, problems: list[str]) -> dict:
-    """Read an old `picos:` block as `criteria` with framework PICOS."""
+def _legacy_picos(data: dict, problems: list[str]) -> tuple[dict, list[tuple[str, str]] | None]:
+    """Read an old `picos:` block as `criteria` with framework PICOS.
+
+    Also returns its rows exactly as the old prompt printed them: the five standard keys first, then any
+    other key in file order, nothing merged or reordered. Two keys that differ only in case (`population`
+    and `Population`) stay two rows, and `Outcomes:` stays an extra row. Changing either would change the
+    prompt fingerprint and retire the project's saved decisions. None when there is no legacy block."""
     if 'picos' not in data:
-        return data
+        return data, None
     data = dict(data)
     picos = data.pop('picos')
     if not picos:   # an empty `picos:` left behind is harmless
-        return data
+        return data, None
     if 'criteria' in data:
         problems.append('project.yaml has both picos and criteria: keep criteria and delete the picos section')
-        return data
+        return data, None
     if not isinstance(picos, dict):
         problems.append('picos should be a section of "name: value" settings')
-        return data
+        return data, None
     # Extra keys (for example `setting:`) were always accepted and screened on, so they stay as extra PICOS rows.
-    data['criteria'] = {'framework': 'PICOS', 'elements': {
-        LEGACY_PICOS.get(k, str(k).replace('_', ' ').capitalize()): v for k, v in picos.items()}}
-    return data
+    order = [k for k in LEGACY_PICOS if k in picos] + [k for k in picos if k not in LEGACY_PICOS]
+    rows = [(LEGACY_PICOS.get(k, str(k).replace('_', ' ').capitalize()), str(picos[k]))
+            for k in order if str(picos[k] or '').strip()]
+    data['criteria'] = {'framework': 'PICOS', 'elements': dict(rows)}   # for validation; the rows are kept apart
+    return data, rows
 
 
 def _type_defaults(data: dict) -> dict:
@@ -472,7 +480,7 @@ def load_project(root: Path | str) -> Project:
         raise ConfigError(['project.yaml must be a set of "name: value" settings'])
 
     problems: list[str] = []
-    data = _legacy_picos(data, problems)
+    data, legacy_rows = _legacy_picos(data, problems)
     raw = _merge(_type_defaults(data), data, problems)
     shape_problem = any(q.startswith('criteria.include ') for q in problems)   # the default [] was kept
     problems += [q for q in _problems(raw) if not (shape_problem and q.startswith('plain criteria need'))]
@@ -490,6 +498,8 @@ def load_project(root: Path | str) -> Project:
     if raw['wiki'].get('deep_tiers') is not None:
         raw['wiki']['deep_tiers'] = [whole_number(d) for d in raw['wiki']['deep_tiers']]
     raw['criteria'] = _normalise_criteria(raw['criteria'])
+    if legacy_rows is not None:
+        raw['criteria']['legacy_rows'] = legacy_rows
 
     tiers = tuple(sorted(
         (Tier(t['id'], str(t['label']).strip(), bool(t.get('included', False)), str(t['definition']).strip())
