@@ -68,6 +68,25 @@ CHECKLISTS: dict[str, dict] = {
             ('q12', 'Does the study have clear implications for practice?'),
         ],
     },
+    'CASP-Qual': {
+        'name': 'CASP checklist for qualitative studies',
+        'answers': ['yes', 'no', "can't tell"],
+        'overall': ['high', 'moderate', 'low'],
+        'note': 'CASP question 10 (how valuable is the research) is open in the original; here it is phrased as '
+                'yes/no and the explanation goes in the page text.',
+        'items': [
+            ('q1', 'Was there a clear statement of the aims of the research?'),
+            ('q2', 'Is a qualitative methodology appropriate?'),
+            ('q3', 'Was the research design appropriate to address the aims of the research?'),
+            ('q4', 'Was the recruitment strategy appropriate to the aims of the research?'),
+            ('q5', 'Were the data collected in a way that addressed the research issue?'),
+            ('q6', 'Has the relationship between researcher and participants been adequately considered?'),
+            ('q7', 'Have ethical issues been taken into consideration?'),
+            ('q8', 'Was the data analysis sufficiently rigorous?'),
+            ('q9', 'Is there a clear statement of findings?'),
+            ('q10', 'Is the research valuable (does it add to knowledge, practice, or policy)?'),
+        ],
+    },
     'RoB2': {
         'name': 'Cochrane RoB 2: risk of bias in randomised trials',
         'answers': ['low', 'some concerns', 'high'],

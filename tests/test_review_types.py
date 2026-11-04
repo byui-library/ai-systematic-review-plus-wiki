@@ -148,6 +148,31 @@ def test_methods_page_shows_framework_and_rules(tmp_path):
     assert 'the PCC criteria' in text
 
 
+def test_casp_qual_checklist():
+    from review.appraisal import checklist
+    from review.config import APPRAISAL_TOOLS
+    tool = checklist('CASP-Qual')
+    assert 'CASP-Qual' in APPRAISAL_TOOLS and len(tool['items']) == 10
+    assert tool['answers'] == ['yes', 'no', "can't tell"]
+
+
+def test_casp_qual_runs_through_the_wiki(classified):
+    """Stubs get the CASP-Qual items, the checklist page renders, and the tables build."""
+    from review import tables, wiki
+    paths, _ = classified
+    data = yaml.safe_load(paths.project_yaml.read_text(encoding='utf-8'))
+    data['appraisal'] = {'tool': 'CASP-Qual'}
+    paths.project_yaml.write_text(yaml.safe_dump(data), encoding='utf-8')
+    project = load_project(paths.root)
+    wiki.scaffold(paths, project)
+    assert 'qualitative studies' in (paths.wiki / 'methods-review/appraisal-checklist.md').read_text(encoding='utf-8')
+    page = next((paths.wiki / 'papers').rglob('*.md'))
+    meta, _ = wiki.read_page(page)
+    assert list(meta['appraisal']['items']) == [f'q{i}' for i in range(1, 11)]
+    tables.build_tables(paths, project)
+    assert 'CASP-Qual' in (paths.wiki / 'tables/appraisal.md').read_text(encoding='utf-8')
+
+
 def test_summary_names_type_and_criteria(tmp_path):
     from review.config import summary
     text = summary(load_project(write_project(tmp_path, review_type='scoping', criteria=PCC)))
