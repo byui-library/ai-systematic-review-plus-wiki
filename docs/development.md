@@ -75,6 +75,8 @@ Commands: `status`, `check-config`, `import`, `prescreen`, `classify --next-batc
 | `publish.py` | Syncs the openequella build into a researcher's `byui-oeq` content repository clone and commits (never pushes) |
 | `demo.py` | Copies `examples/demo/` to a workspace |
 
+The public demo website (<https://byui-library.github.io/ai-systematic-review-plus-wiki/>) is built by `tools/build_demo_site.py`. It runs the same demo steps that `py run.py demo` prints (`DEMO_STEPS` in `run.py`), plus the tables, figures, and graph, then a `github_pages` build into `demo-workspace/site-github_pages/`. Run it locally with `.venv/Scripts/python tools/build_demo_site.py` to preview. It refuses to replace an existing `demo-workspace/` unless you add `--force`. The "Publish website (GitHub Pages)" workflow runs that tool only in this repository, which GitHub marks as a template and which has no `project.yaml`. A repository made from the template publishes its own wiki. To update the demo site, open **Actions → Publish website (GitHub Pages) → Run workflow**.
+
 Tests must pass on Windows and Ubuntu (CI: `.github/workflows/tests.yml`). Tests use synthetic exports from `tests/fixture_exports.py`; never commit real search data outside `examples/demo/`.
 
 Smoke-tested on the reference review's real exports (PubMed, WoS, and SPORTDiscus; about 760 records): raw counts per source match the reference pipeline exactly, and dedup differs by one record, a genuine duplicate that the title+year key catches.

@@ -28,13 +28,24 @@ jobs:
       - id: pages
         uses: actions/configure-pages@v5
         continue-on-error: true   # Pages not switched on yet: still build; the deploy step then says what to do
-      - run: python run.py site --target github_pages
+      # The template repository itself has no review of its own (no project.yaml), so it publishes the demo
+      # review. A repository made from the template publishes its own wiki.
+      - name: Build the website
+        run: |
+          if [ "$IS_TEMPLATE" = "true" ] && [ ! -f project.yaml ]; then
+            python tools/build_demo_site.py
+            echo "SITE_DIR=demo-workspace/site-github_pages" >> "$GITHUB_ENV"
+          else
+            python run.py site --target github_pages
+            echo "SITE_DIR=site-github_pages" >> "$GITHUB_ENV"
+          fi
         env:
+          IS_TEMPLATE: ${{ github.event.repository.is_template }}
           REVIEW_NO_VENV: '1'
           REVIEW_SITE_URL: ${{ steps.pages.outputs.base_url }}   # so the "page not found" page links correctly
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site-github_pages
+          path: ${{ env.SITE_DIR }}
 
   deploy:
     needs: build

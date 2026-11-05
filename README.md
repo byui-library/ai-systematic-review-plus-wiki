@@ -19,7 +19,7 @@ The method was first used for a published sports-science systematic review at BY
 4. **Search your databases** and save the exports in `data/exports/`. [How to export](docs/02-search-and-export.md)
 5. **Say what you want next.** For example: *"import my search results"*, *"classify the papers"*, *"build the wiki"*, *"make the website"*. Or just ask *"what's next?"*: the assistant checks where you are and tells you.
 
-Want to try it first? Ask the assistant to *"install the demo"*, or run `py run.py demo`. The [demo](examples/demo/README.md) is a small real search that you can take through every stage in a few minutes, without an AI subscription.
+Want to try it first? Ask the assistant to *"install the demo"*, or run `py run.py demo`. The [demo](examples/demo/README.md) is a small real search that you can take through every stage in a few minutes, without an AI subscription. To see where it ends up, open the [demo website](https://byui-library.github.io/ai-systematic-review-plus-wiki/), which is built from the demo. Its paper pages are the starting pages, before an AI assistant writes the summaries.
 
 ## The stages
 
