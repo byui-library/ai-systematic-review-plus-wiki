@@ -1,3 +1,8 @@
+import os
+import sys
+import types
+from types import SimpleNamespace
+
 import pytest
 import yaml
 
@@ -5,7 +10,7 @@ from review import jev, state
 from review.config import ConfigError, load_project
 from review.errors import PipelineError
 from review.io import read_json, write_json
-from review.prompt import _digest, build_prompt, prompt_fingerprint
+from review.prompt import _digest, build_prompt, paper_fingerprint, prompt_fingerprint
 
 QUESTIONS = {'structure': 'Does the paper analyse how load metrics relate to each other?',
              'team_sport': 'Were the participants playing a team sport?'}
@@ -128,35 +133,67 @@ def test_fingerprint_ignores_question_order_and_threshold_spelling(workspace):
 
 
 class FakeJev:
-    """Answers from a table {paper id: {question id or text: probability}}; records what was asked."""
-    model = 'jev-test'
+    """Answers from a table {paper title: {question id: probability}}; records what was asked."""
+    model = 'jev-1.14.0'
 
     def __init__(self, table, default=0.05):
         self.table, self.default, self.calls = table, default, []
 
-    def ask(self, paper_state: dict, questions: dict) -> dict:
+    def ask(self, paper_state: dict, questions: dict):
         self.calls.append((paper_state, dict(questions)))
-        row = self.table.get(paper_state['id'], {})
-        return {q: row.get(q, self.default) for q in questions}
+        row = self.table.get(paper_state['title'], {})
+        return {q: row.get(q, self.default) for q in questions}, self.model
+
+
+def candidates(paths):
+    return state.load_candidates(paths)
+
+
+def by_title(paths, table_by_id):
+    """FakeJev never sees ids, so tables written per id are re-keyed by each candidate's title."""
+    titles = {c['id']: c['title'] for c in candidates(paths)}
+    return {titles[pid]: row for pid, row in table_by_id.items()}
+
+
+def title_of(paths, pid):
+    return next(c['title'] for c in candidates(paths) if c['id'] == pid)
+
+
+def edit_candidates(paths, change):
+    cands = candidates(paths)
+    for c in cands:
+        change(c)
+    write_json(paths.candidates, cands)
+
+
+def classify_remaining(paths, project):
+    from review import classify
+    return classify.progress(paths, project)['remaining']
 
 
 def test_state_holds_only_what_a_screener_reads(prescreened):
     paths, _ = prescreened
-    paper = state.load_candidates(paths)[0]
+    paper = candidates(paths)[0]
     s = jev.paper_state(paper)
-    assert set(s) <= {'id', 'title', 'abstract', 'keywords'} and s['title'] == paper['title']
+    assert set(s) <= {'title', 'abstract', 'keywords'} and s['title'] == paper['title']
+
+
+def test_state_drops_empty_fields_and_the_id():
+    paper = {'id': 'doi:x', 'title': 'T', 'abstract': '  ', 'keywords': [], 'journal': 'J', 'year': None}
+    assert jev.paper_state(paper) == {'title': 'T'}
 
 
 def test_screen_decides_confident_papers_and_leaves_unsure_ones(prescreened):
     paths, _ = prescreened
     project = use_jev(paths)
-    ids = [c['id'] for c in state.load_candidates(paths)]
-    fake = FakeJev({ids[0]: {'team_sport': 0.95, 'structure': 0.9},     # tier 1
-                    ids[1]: {'team_sport': 0.95, 'structure': 0.5}})    # unsure: decides 1 vs 2
+    ids = [c['id'] for c in candidates(paths)]
+    fake = FakeJev(by_title(paths, {ids[0]: {'team_sport': 0.95, 'structure': 0.9},     # tier 1
+                                    ids[1]: {'team_sport': 0.95, 'structure': 0.5}}))   # unsure: decides 1 vs 2
     out = jev.screen(paths, project, client=fake)
     ckpt = state.load_checkpoint(paths)
     assert ckpt[ids[0]]['tier'] == 1 and ckpt[ids[0]]['tool'] == 'TypeSafe Jev'
-    assert ckpt[ids[0]]['model'] == 'jev-test' and ckpt[ids[0]]['jev']['answers']['structure'] == 0.9
+    assert ckpt[ids[0]]['model'] == 'jev-1.14.0' and ckpt[ids[0]]['jev']['answers']['structure'] == 0.9
+    assert read_json(paths.jev_answers)[ids[0]]['model'] == 'jev-1.14.0'
     assert ids[1] not in ckpt
     assert out['escalated'] == {ids[1]: ['structure']}
     assert out['decided'] == len(ids) - 1
@@ -194,9 +231,22 @@ def test_fresh_run_and_new_model_ask_again(prescreened):
     assert len(fake.calls) == 2 * n
     write_json(paths.checkpoint, {})
     newer = FakeJev({})
-    newer.model = 'jev-test-2'
+    newer.model = 'jev-1.15.0'
     jev.screen(paths, project, client=newer)
     assert len(newer.calls) == n
+
+
+def test_cache_survives_a_reimport_that_only_changes_the_journal(prescreened):
+    paths, _ = prescreened
+    project = use_jev(paths)
+    fake = FakeJev({})
+    jev.screen(paths, project, client=fake)
+    n = len(fake.calls)
+    edit_candidates(paths, lambda c: c.update(journal='Renamed Journal'))
+    assert classify_remaining(paths, project) == len(candidates(paths))   # the decisions are no longer current
+    out = jev.screen(paths, project, client=fake)
+    assert len(fake.calls) == n and out['asked'] == 0 and out['decided'] == len(candidates(paths))
+    assert classify_remaining(paths, project) == 0
 
 
 def test_a_failed_call_is_an_error_not_a_no(prescreened):
@@ -217,19 +267,31 @@ def test_a_malformed_answer_is_an_error(prescreened, bad):
 
     class Odd(FakeJev):
         def ask(self, paper_state, questions):
-            return bad
+            return bad, self.model
     with pytest.raises(PipelineError):
         jev.screen(paths, use_jev(paths), client=Odd({}))
+
+
+def test_an_answer_from_another_model_is_an_error(prescreened):
+    paths, _ = prescreened
+
+    class Swapped(FakeJev):
+        def ask(self, paper_state, questions):
+            return super().ask(paper_state, questions)[0], 'jev-1.13.0'
+    with pytest.raises(PipelineError, match='jev-1.13.0'):
+        jev.screen(paths, use_jev(paths), client=Swapped({}))
+    assert state.load_checkpoint(paths) == {}
 
 
 def test_answers_received_before_a_failure_are_kept(prescreened):
     paths, _ = prescreened
     project = use_jev(paths)
-    ids = [c['id'] for c in state.load_candidates(paths)]
+    ids = [c['id'] for c in candidates(paths)]
+    second = title_of(paths, ids[1])
 
     class FailsOnSecond(FakeJev):
         def ask(self, paper_state, questions):
-            if paper_state['id'] == ids[1]:
+            if paper_state['title'] == second:
                 raise RuntimeError('timeout')
             return super().ask(paper_state, questions)
     with pytest.raises(PipelineError):
@@ -237,21 +299,115 @@ def test_answers_received_before_a_failure_are_kept(prescreened):
     assert ids[0] in read_json(paths.jev_answers) and ids[0] in state.load_checkpoint(paths)
 
 
+def test_ctrl_c_saves_progress_and_still_stops(prescreened):
+    paths, _ = prescreened
+    project = use_jev(paths)
+    ids = [c['id'] for c in candidates(paths)]
+    second = title_of(paths, ids[1])
+
+    class Interrupted(FakeJev):
+        def ask(self, paper_state, questions):
+            if paper_state['title'] == second:
+                raise KeyboardInterrupt
+            return super().ask(paper_state, questions)
+    with pytest.raises(KeyboardInterrupt):
+        jev.screen(paths, project, client=Interrupted({}))
+    assert ids[0] in read_json(paths.jev_answers) and ids[0] in state.load_checkpoint(paths)
+
+
+def test_a_failed_save_names_both_errors(prescreened, monkeypatch):
+    paths, _ = prescreened
+    project = use_jev(paths)
+
+    class Broken(FakeJev):
+        def ask(self, paper_state, questions):
+            raise RuntimeError('503')
+
+    def disk_full(*_):
+        raise OSError('disk full')
+    monkeypatch.setattr(jev, 'write_json', disk_full)
+    with pytest.raises(PipelineError) as err:
+        jev.screen(paths, project, client=Broken({}))
+    assert '503' in str(err.value) and 'disk full' in str(err.value)
+
+
+def test_saves_every_25_papers_sent_to_jev(prescreened, monkeypatch):
+    paths, _ = prescreened
+    project = use_jev(paths)
+    monkeypatch.setattr(jev, 'FLUSH_EVERY', 1)
+    ids = [c['id'] for c in candidates(paths)]
+    seen_on_disk = []
+
+    class Watches(FakeJev):
+        def ask(self, paper_state, questions):
+            seen_on_disk.append(set(state.load_checkpoint(paths)))
+            return super().ask(paper_state, questions)
+    jev.screen(paths, project, client=Watches({}))
+    assert seen_on_disk[1] == {ids[0]} and seen_on_disk[2] == {ids[0], ids[1]}
+
+
+def test_checkpoint_merge_keeps_a_decision_saved_during_the_run(prescreened):
+    paths, _ = prescreened
+    project = use_jev(paths)
+    cands = candidates(paths)
+    other = cands[-1]
+    theirs = {'tier': 2, 'score': 70, 'reason': 'Saved by the assistant.', 'tool': 'Claude Code',
+              'model': 'claude-opus-5-5', 'timestamp': 'now', 'prompt': prompt_fingerprint(project),
+              'input': paper_fingerprint(other)}
+
+    class SomeoneSaves(FakeJev):
+        def ask(self, paper_state, questions):
+            if paper_state['title'] == cands[1]['title']:
+                write_json(paths.checkpoint, {**state.load_checkpoint(paths), other['id']: theirs})
+            return super().ask(paper_state, questions)
+    jev.screen(paths, project, client=SomeoneSaves({}))
+    ckpt = state.load_checkpoint(paths)
+    assert ckpt[other['id']] == theirs
+    assert all(ckpt[c['id']]['tool'] == 'TypeSafe Jev' for c in cands[:-1])
+
+
+def test_a_paper_without_an_abstract_is_escalated_unasked(prescreened):
+    paths, _ = prescreened
+    project = use_jev(paths)
+    ids = [c['id'] for c in candidates(paths)]
+    edit_candidates(paths, lambda c: c.update(abstract='') if c['id'] == ids[0] else None)
+    fake = FakeJev({})
+    out = jev.screen(paths, project, client=fake)
+    assert out['escalated'] == {ids[0]: ['no_abstract']}
+    assert title_of(paths, ids[0]) not in [s['title'] for s, _ in fake.calls]
+    assert ids[0] not in state.load_checkpoint(paths)
+    assert jev.unsure_questions(paths, project) == {ids[0]: ['No abstract: Jev was not asked']}
+
+
 def test_decisions_count_as_current_for_the_rest_of_the_pipeline(prescreened):
-    from review import classify
     paths, _ = prescreened
     project = use_jev(paths)
     jev.screen(paths, project, client=FakeJev({}))
-    assert classify.progress(paths, project)['remaining'] == 0
+    assert classify_remaining(paths, project) == 0
     assert state.is_done(paths, 'classify')
 
 
 def test_unsure_questions_lists_texts_for_escalated_papers(prescreened):
     paths, _ = prescreened
     project = use_jev(paths)
-    ids = [c['id'] for c in state.load_candidates(paths)]
-    jev.screen(paths, project, client=FakeJev({ids[1]: {'team_sport': 0.95, 'structure': 0.5}}))
+    ids = [c['id'] for c in candidates(paths)]
+    jev.screen(paths, project, client=FakeJev(by_title(paths, {ids[1]: {'team_sport': 0.95, 'structure': 0.5}})))
     assert jev.unsure_questions(paths, project) == {ids[1]: [QUESTIONS['structure']]}
+
+
+def test_unsure_questions_skips_decided_papers_and_other_models(prescreened):
+    paths, _ = prescreened
+    project = use_jev(paths)
+    ids = [c['id'] for c in candidates(paths)]
+    jev.screen(paths, project, client=FakeJev(by_title(paths, {ids[1]: {'team_sport': 0.95, 'structure': 0.5}})))
+    other_model = use_jev(paths, model='jev-1.15.0')
+    assert jev.unsure_questions(paths, other_model) == {}
+    project = use_jev(paths)
+    paper = next(c for c in candidates(paths) if c['id'] == ids[1])
+    write_json(paths.checkpoint, {**state.load_checkpoint(paths), ids[1]: {
+        'tier': 2, 'score': 60, 'reason': 'Assistant.', 'prompt': prompt_fingerprint(project),
+        'input': paper_fingerprint(paper)}})
+    assert jev.unsure_questions(paths, project) == {}
 
 
 def test_needs_the_api_key_and_jev_method(prescreened, monkeypatch):
@@ -261,3 +417,66 @@ def test_needs_the_api_key_and_jev_method(prescreened, monkeypatch):
     monkeypatch.delenv('TYPESAFE_API_KEY', raising=False)
     with pytest.raises(PipelineError, match='TYPESAFE_API_KEY'):
         jev.screen(paths, use_jev(paths))
+
+
+@pytest.mark.parametrize('model', ['jev-latest', 'jev-2-preview', ''])
+def test_model_must_be_an_exact_version(workspace, model):
+    with pytest.raises(ConfigError, match='screening.model must name an exact Jev version'):
+        use_jev(workspace, model=model)
+
+
+def test_default_model_is_pinned(workspace):
+    assert use_jev(workspace).screening['model'] == 'jev-1.14.0'
+
+
+@pytest.fixture
+def stub_sdk(monkeypatch):
+    """A stand-in for typesafe_sdk shaped like v0.7.5: TypeSafeClient(*, api_key, model, ...) with
+    system_one(state, questions, *, model=None, ...) -> SystemOneResponse(model, usage, answers={q: NoulAnswer})."""
+    log = {'clients': []}
+
+    class Noul:
+        def __init__(self, *, type='noul', instructions=None, criteria=None):
+            self.type, self.instructions = type, instructions
+
+    class TypeSafeClient:
+        def __init__(self, *, api_key=None, model=None, **kwargs):
+            self.api_key, self.model, self.closed, self.calls = api_key, model, False, []
+            log['clients'].append(self)
+
+        def system_one(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            answers = {q: SimpleNamespace(type='noul', noul=0.9) for q in kwargs['questions']}
+            return SimpleNamespace(model=self.model, usage=None, answers=answers)
+
+        def close(self):
+            self.closed = True
+
+    module = types.ModuleType('typesafe_sdk')
+    module.Noul, module.TypeSafeClient = Noul, TypeSafeClient
+    monkeypatch.setitem(sys.modules, 'typesafe_sdk', module)
+    return log
+
+
+def test_client_calls_the_sdk_with_keywords_and_maps_answers(stub_sdk, monkeypatch):
+    monkeypatch.delenv('TYPESAFE_API_KEY', raising=False)
+    client = jev.Client('secret', 'jev-1.14.0')
+    sdk = stub_sdk['clients'][0]
+    assert (sdk.api_key, sdk.model) == ('secret', 'jev-1.14.0')
+    assert 'TYPESAFE_API_KEY' not in os.environ          # the key is passed, not put in the environment
+    answers, answered_by = client.ask({'title': 'T', 'abstract': 'A'}, {'structure': 'Is it?'})
+    args, kwargs = sdk.calls[0]
+    assert args == () and kwargs['state'] == {'title': 'T', 'abstract': 'A'}
+    assert kwargs['questions']['structure'].instructions == 'Is it?'
+    assert answers == {'structure': 0.9} and answered_by == 'jev-1.14.0'
+    client.close()
+    assert sdk.closed
+
+
+def test_screen_uses_the_configured_model_and_closes_its_client(prescreened, stub_sdk, monkeypatch):
+    paths, _ = prescreened
+    monkeypatch.setenv('TYPESAFE_API_KEY', 'secret')
+    out = jev.screen(paths, use_jev(paths))
+    sdk = stub_sdk['clients'][0]
+    assert sdk.model == 'jev-1.14.0' and sdk.closed and out['model'] == 'jev-1.14.0'
+    assert all(e['model'] == 'jev-1.14.0' for e in state.load_checkpoint(paths).values())

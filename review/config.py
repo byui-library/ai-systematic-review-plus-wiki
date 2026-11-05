@@ -64,7 +64,8 @@ DEFAULTS: dict = {
     'pdfs': {'libkey': True, 'unpaywall': True},
     'site': {'title': '', 'targets': ['local']},
     'classify': {'batch_size': 50},
-    'screening': {'method': 'assistant', 'thresholds': {'yes_at_least': 0.7, 'no_at_most': 0.3}, 'questions': {}},
+    'screening': {'method': 'assistant', 'model': 'jev-1.14.0',
+                  'thresholds': {'yes_at_least': 0.7, 'no_at_most': 0.3}, 'questions': {}},
     'wiki': {'deep_tiers': None},   # None: the first included tier gets the deep, researcher-confirmed pages
 }
 
@@ -469,6 +470,10 @@ def _screening_problems(raw: dict) -> list[str]:
                          f"('not' is reserved); fix '{_word(k)}'")
             elif not isinstance(v, str) or not v.strip():
                 p.append(f"screening question '{k}' needs its text")
+        model = s.get('model')
+        if not isinstance(model, str) or not model.strip() or model.strip().endswith(('-latest', '-preview')):
+            p.append('screening.model must name an exact Jev version such as jev-1.14.0, '
+                     'so the methods section can report it')
     p += _threshold_problems(s.get('thresholds'))
     used = set()
     for i, tier in enumerate(tiers):
