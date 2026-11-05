@@ -61,13 +61,6 @@ except ImportError as exc:
              'bash setup/install-mac.sh on a Mac.')
 
 
-def _rel(paths: Paths, p: Path) -> str:
-    try:
-        return p.relative_to(paths.root).as_posix()
-    except ValueError:
-        return str(p)
-
-
 def cmd_status(args, paths: Paths) -> None:
     print(state.status_text(paths))
 
@@ -75,7 +68,7 @@ def cmd_status(args, paths: Paths) -> None:
 def cmd_check_config(args, paths: Paths) -> None:
     project = load_project(paths.root)
     print(summary(project))
-    print(f"\nproject.yaml looks good. Next step: {state.NEXT['import']}")
+    print(f"\n{paths.show(paths.project_yaml)} looks good. Next step: {state.next_step(paths, 'import')}")
 
 
 def cmd_import(args, paths: Paths) -> None:
@@ -84,14 +77,14 @@ def cmd_import(args, paths: Paths) -> None:
         print(f"  {f['file']}: {f['records']} records ({f['format']})")
     print(f"{stats['total_raw']} records found, {stats['unique']} unique after removing "
           f"{stats['duplicates_removed']} duplicates.")
-    print(f"Next step: {state.NEXT['prescreen']}")
+    print(f"Next step: {state.next_step(paths, 'prescreen')}")
 
 
 def cmd_prescreen(args, paths: Paths) -> None:
     c = stages.run_prescreen(paths, load_project(paths.root))
     print(f"{c['prefilter_excluded']} removed by filters, {c['prescreen_excluded']} removed by keyword score, "
           f"{c['candidates']} candidates for AI screening.")
-    print(f"Next step: {state.NEXT['classify']}")
+    print(f"Next step: {state.next_step(paths, 'classify')}")
 
 
 def cmd_classify(args, paths: Paths) -> None:
@@ -102,17 +95,18 @@ def cmd_classify(args, paths: Paths) -> None:
         print(f"Saved {out['saved']} decisions ({out['new']} new). {out['classified']}/{out['total']} classified, "
               f"{out['remaining']} remaining. ({tiers})")
         if out['remaining'] == 0:
-            print(f"Classification complete. Next step: {state.NEXT['validate']}")
+            print(f"Classification complete. Next step: {state.next_step(paths, 'validate')}")
         return
     if args.next_batch is not None:
         batch = classify.next_batch(paths, project, args.next_batch or None)
         if not batch['papers']:
-            print(f"All candidates are classified. Next step: {state.NEXT['validate']}")
+            print(f"All candidates are classified. Next step: {state.next_step(paths, 'validate')}")
             return
-        print(f"Wrote {len(batch['papers'])} papers to {_rel(paths, paths.classify_batch)} "
+        print(f"Wrote {len(batch['papers'])} papers to {paths.show(paths.classify_batch)} "
               f"({batch['remaining_after_this_batch']} left after this batch).")
-        print(f"Follow prompts/02-classify.md, write decisions to {_rel(paths, paths.classify_results)}, then run:")
-        print(f'  py run.py classify --save {_rel(paths, paths.classify_results)} '
+        print(f"Follow prompts/02-classify.md, write decisions to {paths.show(paths.classify_results)}, then run:")
+        results = _shell_quote(paths.show(paths.classify_results), windows=os.name == 'nt')   # part of a command
+        print(f'  py run.py classify --save {results} '
               '--tool "<your tool>" --model "<your model id>"')
         return
     prog = classify.progress(paths, project)
@@ -126,15 +120,15 @@ def cmd_validate(args, paths: Paths) -> None:
         res = validate.score_sample(paths, project)
         print(f"Scored {res['n']} papers. Tier agreement {res['tier_agreement']:.0%} (kappa {res['tier_kappa']}); "
               f"include/exclude agreement {res['include_agreement']:.0%} (kappa {res['include_kappa']}).")
-        print(f'{len(res["disagreements"])} disagreement(s). Draft disclosure: {_rel(paths, paths.ai_disclosure)}')
-        print(f"Next step: {state.NEXT['report']}")
+        print(f'{len(res["disagreements"])} disagreement(s). Draft disclosure: {paths.show(paths.ai_disclosure)}')
+        print(f"Next step: {state.next_step(paths, 'report')}")
         return
     out = validate.draw_sample(paths, project, force=args.force)
     if out.get('not_applicable'):
         print('No candidates passed prescreening, so human validation is not applicable.')
-        print(f"Next step: {state.NEXT['report']}")
+        print(f"Next step: {state.next_step(paths, 'report')}")
         return
-    print(f"Drew {out['sampled']} papers into {_rel(paths, paths.validation_xlsx)}.")
+    print(f"Drew {out['sampled']} papers into {paths.show(paths.validation_xlsx)}.")
     print('Open it, type your own tier for each paper in the "Your tier" column (without looking at the '
           'AI decisions), save, then run: py run.py validate --score')
 
@@ -143,33 +137,46 @@ def cmd_report(args, paths: Paths) -> None:
     project = load_project(paths.root)
     out = report.run_report(paths, project)
     for f in out['files']:
-        print(f'  wrote {_rel(paths, f)}')
+        print(f'  wrote {paths.show(f)}')
     print(f"{out['included']} included, {out['excluded']} excluded.")
     if out['unclassified']:
         print(f"Warning: {out['unclassified']} candidates are not classified yet; the report is incomplete.")
     else:
-        print(f"Next step: {state.NEXT['pdfs']}")
+        print(f"Next step: {state.next_step(paths, 'pdfs')}")
 
 
 def cmd_pdfs(args, paths: Paths) -> None:
     project = load_project(paths.root)
-    manual_list = _rel(paths, paths.manual_downloads)
+    manual_list = paths.show(paths.manual_downloads)
     if args.match:
         out = pdfs.match_dropped(paths, project)
-        for m in out['matched']:
-            print(f"  matched {m['file']} -> wiki/{m['saved_as']}")
+        for m in out['matched']:   # every file name here is relative to wiki/
+            print(f"  matched {paths.show(paths.wiki / m['file'])} -> {paths.show(paths.wiki / m['saved_as'])}")
         for d in out['duplicates']:
-            print(f"  {d['file']}: that paper already has its PDF; left in place")
+            print(f"  {paths.show(paths.wiki / d['file'])}: that paper already has its PDF; left in place")
         for name in out['unmatched']:
-            print(f'  {name}: could not tell which paper this is; rename it to the save_as name in {manual_list}')
+            print(f'  {paths.show(paths.wiki / name)}: could not tell which paper this is; rename it to the save_as name in {manual_list}')
         print(f"{len(out['matched'])} matched, {len(out['duplicates'])} duplicate(s), {len(out['unmatched'])} unmatched.")
     else:
         out = pdfs.download_all(paths, project)
         print(f"{out['downloaded']} downloaded, {out['exists']} already present, {out['manual']} need manual download.")
+        env, project_yaml = paths.show(paths.env), paths.show(paths.project_yaml)
+        needs = out['setup_needed']
+        either = 'Either one is enough: ' if len(needs) > 1 else ''
+        if not out['manual']:
+            pass
+        elif not out['sources_ready'] and needs:
+            print(f"Nothing was fetched automatically: no download source is set up. {either}{'; '.join(needs)} "
+                  f'in {env}. Add it and run this again (docs/06-pdfs.md).')
+        elif not out['sources_ready']:
+            print(f'Nothing was fetched automatically: downloads are turned off in {project_yaml} '
+                  '(pdfs: libkey and unpaywall).')
+        elif needs:
+            print(f"Not used: {'; '.join(needs)} in {env}. Add it, or turn it off under pdfs: in {project_yaml}.")
         if out['manual']:
-            print(f'Open {manual_list}, download each paper through your library, and save it in wiki/raw/inbox/ '
-                  '(any filename). Then run: py run.py pdfs --match')
-    print(f"Next step: {state.NEXT['wiki']}")
+            print(f'Open {manual_list}, download each paper through your library, and save it in '
+                  f'{paths.show(paths.inbox, folder=True)} (any filename). Then run: py run.py pdfs --match')
+    print(f"Next step: {state.next_step(paths, 'wiki')}")
 
 
 def cmd_wiki(args, paths: Paths) -> None:
@@ -179,9 +186,9 @@ def cmd_wiki(args, paths: Paths) -> None:
         print(f"{out['created']} paper pages created, {out['refreshed']} stubs refreshed, "
               f"{out['kept']} written pages kept.")
         for rel in out['orphaned']:
-            print(f'  {rel}: no longer included; kept so no work is lost (delete it yourself if unwanted)')
-        print('Open the wiki/ folder in Obsidian ("Open folder as vault"). Next step: ask your AI assistant to '
-              '"summarise the next paper" (it follows prompts/03-summarize-papers.md)')
+            print(f'  {paths.show(paths.wiki / rel)}: no longer included; kept so no work is lost (delete it yourself if unwanted)')
+        print(f'Open the {paths.show(paths.wiki, folder=True)} folder in Obsidian ("Open folder as vault"). '
+              'Next step: ask your AI assistant to "summarise the next paper" (it follows prompts/03-summarize-papers.md)')
     elif args.next_paper:
         task = wiki.next_paper(paths, project)
         if task is None:
@@ -189,16 +196,17 @@ def cmd_wiki(args, paths: Paths) -> None:
             return
         how = ('summarise it to the researcher and wait for confirmation before writing' if task['depth'] == 'deep'
                else 'write it directly and tag every number [VERIFY]')
-        print(f"Next paper: {task['page']} ({task['depth']}: {how}). Text comes from the {task['source']}.")
-        print(f"Details: {_rel(paths, paths.wiki_task)}. {task['remaining']} more after this one.")
+        print(f"Next paper: {paths.show(paths.root / task['page'])} ({task['depth']}: {how}). Text comes from the {task['source']}.")
+        print(f"Details: {paths.show(paths.wiki_task)}. {task['remaining']} more after this one.")
     elif args.check:
         out = wiki.check(paths, project)
         counts = sorted((str(k), v) for k, v in out['by_status'].items())   # a missing status shows as None
         print('Pages by status: ' + ', '.join(f'{k} {v}' for k, v in counts))
         for rel in out['awaiting_confirmation']:
-            print(f'  {rel}: written as a draft; deep pages need the researcher to confirm them (status: confirmed)')
+            print(f'  {paths.show(paths.wiki / rel)}: written as a draft; deep pages need the researcher to confirm '
+                  'them (status: confirmed)')
         for rel in out['unreadable']:
-            print(f'  {rel}: marked unreadable')
+            print(f'  {paths.show(paths.wiki / rel)}: marked unreadable')
         if out['problems']:
             raise PipelineError(f"{len(out['problems'])} problem(s) in paper pages:", out['problems'][:30])
         if out['done']:
@@ -211,11 +219,12 @@ def cmd_wiki(args, paths: Paths) -> None:
             print('Waiting for the researcher to confirm the deep-tier drafts listed above.')
     elif args.tables:
         for path in tables.build_tables(paths, project):
-            print(f'  wrote {_rel(paths, path)}')
+            print(f'  wrote {paths.show(path)}')
         print(f'Next step: {_after_tables(project)}')
     else:
-        print(f'  wrote {_rel(paths, wiki.build_index(paths, project))}')
-        print('Next step: open wiki/index.md in Obsidian to browse the review, or continue with: py run.py status')
+        index = paths.show(wiki.build_index(paths, project))
+        print(f'  wrote {index}')
+        print(f'Next step: open {index} in Obsidian to browse the review, or continue with: py run.py status')
 
 
 def _after_tables(project) -> str:
@@ -238,21 +247,23 @@ def _after_graph() -> str:
 def cmd_figures(args, paths: Paths) -> None:
     project = load_project(paths.root)
     if not project.outputs.get('figures'):
-        print(f'Figures are turned off in project.yaml (outputs: figures: false). Next step: {_after_figures(project)}')
+        print(f'Figures are turned off in {paths.show(paths.project_yaml)} (outputs: figures: false). '
+              f'Next step: {_after_figures(project)}')
         return
     for path in figures.build_figures(paths, project):
-        print(f'  wrote {_rel(paths, path)}')
-    print(f'Figures are shown on wiki/tables/figures.md. Next step: {_after_figures(project)}')
+        print(f'  wrote {paths.show(path)}')
+    print(f"Figures are shown on {paths.show(paths.wiki / 'tables/figures.md')}. Next step: {_after_figures(project)}")
 
 
 def cmd_graph(args, paths: Paths) -> None:
     if not load_project(paths.root).outputs.get('knowledge_graph'):
-        print(f'The knowledge graph is turned off in project.yaml (outputs: knowledge_graph: false). '
-              f'Next step: {_after_graph()}')
+        print(f'The knowledge graph is turned off in {paths.show(paths.project_yaml)} '
+              f'(outputs: knowledge_graph: false). Next step: {_after_graph()}')
         return
     out = graph.build_graph(paths)
-    print(f"{out['nodes']} pages and {out['edges']} links in wiki/tables/graph.html "
-          f"({out['unresolved']} link(s) could not be resolved; see wiki/tables/knowledge-graph.md).")
+    tables_dir = paths.wiki / 'tables'
+    print(f"{out['nodes']} pages and {out['edges']} links in {paths.show(tables_dir / 'graph.html')} "
+          f"({out['unresolved']} link(s) could not be resolved; see {paths.show(tables_dir / 'knowledge-graph.md')}).")
     print(f'Next step: {_after_graph()}')
 
 
@@ -264,13 +275,13 @@ def cmd_site(args, paths: Paths) -> None:
         return
     out, warnings = site.build_site(paths, project, args.target)
     files = sum(1 for f in out.rglob('*') if f.is_file())
-    print(f'Built the {args.target} website in {_rel(paths, out)}/ ({files} files).')
+    print(f'Built the {args.target} website in {paths.show(out, folder=True)} ({files} files).')
     if warnings:
         print(f'{len(warnings)} MkDocs warning(s); the first few:')
         for message in warnings[:5]:
             print(f'  {message}')
     next_steps = {
-        'local': f'open {_rel(paths, out)}/index.html in your browser, or preview with: py run.py site --serve. '
+        'local': f"open {paths.show(out / 'index.html')} in your browser, or preview with: py run.py site --serve. "
                  'To put it online, see docs/08-website.md',
         'github_pages': 'this build contains no PDFs. To put it online, run the "Publish website (GitHub Pages)" '
                         "workflow from your repository's Actions tab (docs/08-website.md)",
@@ -380,7 +391,8 @@ _HINT = re.compile(r'py run\.py (?!--root )')
 
 
 class _RootHints:
-    """Wraps stdout/stderr so every `py run.py …` hint includes the --root the user gave, ready to copy."""
+    """Wraps stdout/stderr so every `py run.py …` hint includes the --root the user gave, ready to copy.
+    (File names need no rewriting: they are written from the folder the user is in; see Paths.show.)"""
 
     def __init__(self, stream, root: str):
         self._stream, self._prefix = stream, f'py run.py --root {root} '

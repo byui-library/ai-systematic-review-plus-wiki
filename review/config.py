@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -108,6 +109,17 @@ class Paths:
         self.wiki = self.root / 'wiki'
         self.raw = self.wiki / 'raw'
         self.inbox = self.raw / 'inbox'
+
+    def show(self, path: Path, folder: bool = False) -> str:
+        """Name a project file the way the researcher would type it: from the folder they are in
+        (demo-workspace/data/validation.xlsx when they work from the template folder), otherwise in full."""
+        try:
+            text, sep = Path(path).relative_to(Path.cwd().resolve()).as_posix(), '/'
+        except (ValueError, OSError):   # outside the current folder, or the current folder is gone
+            text, sep = str(path), os.sep
+        if text == '.':   # the current folder itself: "./" says nothing, so name it
+            text, sep = str(path), os.sep
+        return text + sep if folder else text
 
 
 @dataclass(frozen=True)

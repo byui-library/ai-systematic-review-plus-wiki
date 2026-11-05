@@ -17,7 +17,15 @@ def test_progression(workspace):
 def test_setup_first_when_no_project(tmp_path):
     paths = Paths(tmp_path)
     assert state.next_stage(paths) == 'setup'
-    assert 'set up my review' in state.status_text(paths)
+    text = state.status_text(paths)
+    assert text.count('set up my review') == 1   # said once, not again as a problem
+    assert f'There is no project.yaml in {paths.root}' in text   # the full folder shows a wrong --root
+
+
+def test_setup_problems_are_listed_when_project_yaml_is_wrong(tmp_path):
+    paths = Paths(tmp_path)
+    paths.project_yaml.write_text('title: [unclosed\n', encoding='utf-8')
+    assert 'not valid YAML' in state.status_text(paths)
 
 
 def test_clear_from_resets_later_stages(workspace):

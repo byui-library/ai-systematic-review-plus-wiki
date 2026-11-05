@@ -129,6 +129,64 @@ def test_nothing_available_goes_to_manual_list(creds, net):
     assert doe['save_as'].startswith('wiki/raw/tier1/T1-01 - ')
 
 
+def test_without_any_source_nothing_is_asked_and_nothing_waits(creds, net, monkeypatch):
+    paths, project, write = creds
+    write(LIBKEY_LIBRARY_ID='164')   # half the LibKey details is not enough
+    fake = net()
+    waits = []
+    monkeypatch.setattr(pdfs.time, 'sleep', waits.append)
+    out = pdfs.download_all(paths, project, delay=1)
+    assert out['manual'] == 2 and not out['sources_ready'] and fake.calls == [] and waits == []
+    assert out['setup_needed'] == ['LibKey needs LIBKEY_LIBRARY_ID and LIBKEY_API_TOKEN',
+                                   'Unpaywall needs UNPAYWALL_EMAIL']
+
+
+@pytest.mark.parametrize('values, settings, ready, missing', [
+    ({'LIBKEY_LIBRARY_ID': '1', 'LIBKEY_API_TOKEN': 't', 'UNPAYWALL_EMAIL': 'a@b.c'}, None,
+     {'libkey': ('1', 't'), 'unpaywall': ('a@b.c',)}, []),
+    ({'UNPAYWALL_EMAIL': 'a@b.c'}, None, {'unpaywall': ('a@b.c',)},
+     ['LibKey needs LIBKEY_LIBRARY_ID and LIBKEY_API_TOKEN']),
+    ({'LIBKEY_LIBRARY_ID': '1', 'LIBKEY_API_TOKEN': 't'}, {'libkey': False, 'unpaywall': False}, {}, []),
+])
+def test_a_source_needs_both_its_switch_and_its_details(classified, values, settings, ready, missing):
+    _, project = classified
+    if settings is not None:
+        project.raw['pdfs'] = settings
+    assert pdfs.sources(values, project) == (ready, missing)
+
+
+def test_sources_turned_off_on_purpose_are_not_asked_for(creds, net):
+    paths, project, write = creds
+    project.raw['pdfs'] = {'libkey': False, 'unpaywall': False}
+    net()
+    out = pdfs.download_all(paths, project, delay=0)
+    assert out['setup_needed'] == [] and not out['sources_ready']
+
+
+BOTH_ON, BOTH_OFF, LIBKEY_ONLY = ({'libkey': True, 'unpaywall': True}, {'libkey': False, 'unpaywall': False},
+                                  {'libkey': True, 'unpaywall': False})
+
+
+@pytest.mark.parametrize('env, switches, expected, unexpected', [
+    ({}, BOTH_ON, 'no download source is set up. Either one is enough: LibKey needs', 'turned off'),
+    ({}, LIBKEY_ONLY, 'no download source is set up. LibKey needs', 'Either'),   # the other is off on purpose
+    ({}, BOTH_OFF, 'downloads are turned off in', 'LIBKEY'),   # never asks for a source switched off on purpose
+    ({'UNPAYWALL_EMAIL': 'me@example.edu'}, BOTH_ON, 'Not used: LibKey needs', 'Either'),
+])
+def test_cli_says_why_nothing_was_fetched(creds, net, capsys, env, switches, expected, unexpected):
+    import yaml
+    from run import main
+    paths, _, write = creds
+    write(**env)
+    data = yaml.safe_load(paths.project_yaml.read_text(encoding='utf-8'))
+    data['pdfs'] = switches
+    paths.project_yaml.write_text(yaml.safe_dump(data), encoding='utf-8')
+    net()
+    assert main(['--root', str(paths.root), 'pdfs']) == 0
+    out = capsys.readouterr().out
+    assert expected in out and unexpected not in out
+
+
 def test_paper_without_doi_is_listed_with_a_title_search(creds, net):
     paths, project, write = creds
     cands = read_json(paths.candidates)
@@ -264,3 +322,12 @@ def test_unmatched_and_duplicate_drops_are_left_alone(after_failed_download):
     assert out['unmatched'] == ['raw/inbox/random.pdf']
     assert (paths.inbox / 'copy.pdf').exists() and (paths.inbox / 'random.pdf').exists()
     assert (paths.wiki / papers[DOE].pdf_rel).exists()
+
+
+def test_match_names_dropped_files_where_the_user_can_find_them(after_failed_download, capsys):
+    from run import main
+    paths, _, _ = after_failed_download
+    make_pdf(paths.inbox / 'random.pdf', 'Something entirely unrelated')
+    capsys.readouterr()
+    assert main(['--root', str(paths.root), 'pdfs', '--match']) == 0
+    assert f"  {paths.show(paths.inbox / 'random.pdf')}: could not tell" in capsys.readouterr().out

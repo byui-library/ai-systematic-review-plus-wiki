@@ -137,7 +137,7 @@ def test_output_switches_are_respected(classified, capsys):
     assert main(root + ['wiki', '--scaffold']) == 0
     assert main(root + ['figures']) == 0 and main(root + ['graph']) == 0
     out = capsys.readouterr().out
-    assert out.count('turned off in project.yaml') == 2
+    assert out.count('project.yaml (outputs:') == 2   # named from the --root folder
     assert not (paths.wiki / 'tables/figures.md').exists() and not (paths.wiki / 'tables/graph.html').exists()
 
 

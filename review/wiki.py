@@ -296,7 +296,7 @@ def _ordered(papers: list[Paper], project: Project) -> list[Paper]:
 def _status(paths: Paths, paper: Paper) -> str:
     page = paths.wiki / paper.page_rel
     if not page.exists():
-        raise PipelineError(f'{paper.page_rel} does not exist yet. Run: py run.py wiki --scaffold')
+        raise PipelineError(f'{paths.show(page)} does not exist yet. Run: py run.py wiki --scaffold')
     return read_page(page)[0].get('status', 'stub')
 
 
@@ -427,17 +427,18 @@ def check(paths: Paths, project: Project) -> dict:
     papers = included_papers(paths, project)
     for paper in papers:
         page = paths.wiki / paper.page_rel
+        shown = paths.show(page)
         if not page.exists():
-            problems.append(f'{paper.page_rel}: missing. Run: py run.py wiki --scaffold')
+            problems.append(f'{shown}: missing. Run: py run.py wiki --scaffold')
             continue
         try:
             meta, body = read_page(page)
         except PipelineError as err:
-            problems.append(f'{paper.page_rel}: {err}')
+            problems.append(f'{shown}: {err}')
             continue
         status = meta.get('status')
         by_status[status] += 1
-        problems += [f'{paper.page_rel}: {p}' for p in _page_problems(meta, body, paper, project)]
+        problems += [f'{shown}: {p}' for p in _page_problems(meta, body, paper, project)]
         if status == 'unreadable':
             unreadable.append(paper.page_rel)
         if status == 'draft' and paper.tier in project.deep_tiers:

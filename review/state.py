@@ -1,6 +1,8 @@
 """Which stage is done, what the researcher should do next, and the shared screening-data loaders."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from .config import ConfigError, Paths, load_project
 from .errors import PipelineError
 from .io import now_iso, read_json, write_json
@@ -8,13 +10,16 @@ from .prompt import paper_fingerprint, prompt_fingerprint
 
 STAGES = ('setup', 'import', 'prescreen', 'classify', 'validate', 'report', 'pdfs', 'wiki', 'site', 'publish')
 
-NEXT = {
-    'setup': 'Ask your AI assistant to "set up my review" (or copy project.example.yaml to project.yaml '
+EXAMPLE_PROJECT = Path(__file__).resolve().parent.parent / 'project.example.yaml'   # in the template folder
+
+# Read through next_step, which names the {files} from the folder the researcher is in.
+_NEXT = {
+    'setup': 'Ask your AI assistant to "set up my review" (or copy {example} to {project_yaml} '
              'and edit it), then run: py run.py check-config',
-    'import': 'Save your database exports in data/exports/, then run: py run.py import',
+    'import': 'Save your database exports in {exports}, then run: py run.py import',
     'prescreen': 'py run.py prescreen',
     'classify': 'Ask your AI assistant to "classify the next batch" (it follows prompts/02-classify.md)',
-    'validate': 'py run.py validate --draw, then re-screen data/validation.xlsx yourself, '
+    'validate': 'py run.py validate --draw, then re-screen {validation} yourself, '
                 'then py run.py validate --score',
     'report': 'py run.py report',
     'pdfs': 'py run.py pdfs',
@@ -24,12 +29,18 @@ NEXT = {
 }
 
 
+def next_step(paths: Paths, stage: str) -> str:
+    """What to do for `stage`, with every file named from the folder the researcher is in."""
+    return _NEXT[stage].format(example=paths.show(EXAMPLE_PROJECT), project_yaml=paths.show(paths.project_yaml),
+                       exports=paths.show(paths.exports, folder=True), validation=paths.show(paths.validation_xlsx))
+
+
 # ── Screening data ────────────────────────────────────────────────────────────
 
 def load_candidates(paths: Paths, required: bool = True) -> list[dict] | None:
     cands = read_json(paths.candidates)
     if cands is None and required:
-        raise PipelineError(f"No candidates yet. Run: {NEXT['prescreen']}")
+        raise PipelineError(f"No candidates yet. Run: {next_step(paths, 'prescreen')}")
     return cands
 
 
@@ -151,7 +162,9 @@ def status_text(paths: Paths) -> str:
     if nxt is None:
         lines.append('Every stage is done.')
     else:
-        lines.append(f'Next step: {NEXT[nxt]}')
-        if nxt == 'setup':
+        lines.append(f'Next step: {next_step(paths, nxt)}')
+        if nxt == 'setup' and not paths.project_yaml.exists():   # the line above already says what to do
+            lines.append(f'  - There is no project.yaml in {paths.root}')
+        elif nxt == 'setup':
             lines += [f'  - {p}' for p in problems]
     return '\n'.join(lines)
