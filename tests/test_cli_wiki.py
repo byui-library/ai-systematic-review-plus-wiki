@@ -32,7 +32,8 @@ def test_wiki_stage_end_to_end(classified, capsys, monkeypatch):
 
     assert main(root + ['pdfs']) == 0
     out = capsys.readouterr().out
-    assert '2 need manual download' in out and 'data/manual_downloads.csv' in out and 'wiki/raw/inbox' in out
+    assert '2 need manual download' in out and paths.show(paths.manual_downloads) in out
+    assert paths.show(paths.inbox, folder=True) in out
 
     make_pdf(paths.inbox / 'saved from browser.pdf', 'doi: 10.1000/example.001')
     assert main(root + ['pdfs', '--match']) == 0

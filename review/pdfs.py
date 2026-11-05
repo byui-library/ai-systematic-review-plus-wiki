@@ -85,12 +85,31 @@ def fetch_pdf(url: str, dest: Path, timeout: int = 60) -> bool:
 
 # ── strategies ────────────────────────────────────────────────────────────────
 
-def _links(doi: str, env: dict, project: Project):
+# Download sources in order of preference: (project.yaml pdfs: switch, name, the .env values it needs).
+SOURCES = (('libkey', 'LibKey', ('LIBKEY_LIBRARY_ID', 'LIBKEY_API_TOKEN')),
+           ('unpaywall', 'Unpaywall', ('UNPAYWALL_EMAIL',)))
+
+
+def sources(env: dict, project: Project) -> tuple[dict[str, tuple[str, ...]], list[str]]:
+    """(ready, missing): each source turned on in project.yaml with its .env values, and, for each one turned on
+    but not usable, what it still needs."""
+    ready, missing = {}, []
+    for key, name, names in SOURCES:
+        if not project.raw['pdfs'].get(key):
+            continue
+        values = tuple(env.get(n) for n in names)
+        if all(values):
+            ready[key] = values
+        else:
+            missing.append(f"{name} needs {' and '.join(names)}")
+    return ready, missing
+
+
+def _links(doi: str, ready: dict[str, tuple[str, ...]]):
     """Yield (source, url or None) in order of preference; each source is only queried when reached."""
     quoted = urllib.parse.quote(doi, safe='/')
-    settings = project.raw['pdfs']
-    library, token = env.get('LIBKEY_LIBRARY_ID'), env.get('LIBKEY_API_TOKEN')
-    if settings.get('libkey') and library and token:
+    if 'libkey' in ready:
+        library, token = ready['libkey']
         status, body = fetch_json(f'{LIBKEY_BASE}{urllib.parse.quote(library)}/articles/doi/{quoted}',
                                   headers={'Authorization': f'Bearer {token}'})
         if status == 401:
@@ -99,8 +118,8 @@ def _links(doi: str, env: dict, project: Project):
         data = (body or {}).get('data') or {}
         yield 'libkey', data.get('fullTextFile')
         yield 'libkey-link', data.get('fullTextLink')
-    email = env.get('UNPAYWALL_EMAIL')
-    if settings.get('unpaywall') and email:
+    if 'unpaywall' in ready:
+        email, = ready['unpaywall']
         _, body = fetch_json(f'{UNPAYWALL_BASE}{quoted}?email={urllib.parse.quote(email)}')
         yield 'unpaywall', ((body or {}).get('best_oa_location') or {}).get('url_for_pdf')
 
@@ -194,7 +213,7 @@ def match_dropped(paths: Paths, project: Project) -> dict:
 
 
 def download_all(paths: Paths, project: Project, delay: float = 1.0) -> dict:
-    env = load_env(paths)
+    ready, missing = sources(load_env(paths), project)
     papers = included_papers(paths, project)
     log = read_json(paths.pdf_log, {})
     counts: Counter = Counter()
@@ -209,14 +228,14 @@ def download_all(paths: Paths, project: Project, delay: float = 1.0) -> dict:
             dest.unlink(missing_ok=True)   # an earlier download that was really an HTML login page
             attempts, source = [], None
             if paper.get('doi'):
-                for name, url in _links(paper.get('doi'), env, project):
+                for name, url in _links(paper.get('doi'), ready):
                     ok = bool(url) and fetch_pdf(url, dest)
                     attempts.append({'source': name, 'url': url,
                                      'result': 'pdf' if ok else ('no link' if not url else 'not a pdf')})
                     if ok:
                         source = name
                         break
-                if delay:
+                if delay and attempts:   # be polite to the services; no wait when none was asked
                     time.sleep(delay)
             status = 'downloaded' if source else ('manual' if paper.get('doi') else 'no_doi')
             log[paper.id] = {'status': status, 'source': source, 'file': paper.pdf_rel, 'attempts': attempts,
@@ -227,4 +246,7 @@ def download_all(paths: Paths, project: Project, delay: float = 1.0) -> dict:
         write_manual_list(paths, [p for p in papers if not is_pdf(paths.wiki / p.pdf_rel)])
     state.mark_done(paths, 'pdfs', downloaded=counts['downloaded'], manual=counts['manual'])
     return {'downloaded': counts['downloaded'], 'exists': counts['exists'], 'manual': counts['manual'],
-            'total': len(papers)}
+            'total': len(papers),
+            # Whether any source could be asked, and what the sources turned on in project.yaml still need
+            # (empty when both are off on purpose).
+            'sources_ready': bool(ready), 'setup_needed': missing}

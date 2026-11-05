@@ -25,7 +25,7 @@ def run_prescreen(paths: Paths, project: Project) -> dict:
     """Apply hard filters and keyword scoring; write candidates and both exclusion lists. Returns the counts."""
     records = read_json(paths.records)
     if records is None:
-        raise PipelineError(f"No imported records yet. {state.NEXT['import']}")
+        raise PipelineError(f"No imported records yet. {state.next_step(paths, 'import')}")
     keep, pre_ex = screen.pre_filter(records, project.exclude)
     cands, ps_ex = screen.prescreen(keep, project.keyword_groups, project.threshold)
     write_json(paths.prefilter_excluded, pre_ex)

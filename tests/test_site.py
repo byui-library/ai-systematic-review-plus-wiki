@@ -84,6 +84,15 @@ def test_public_build_never_contains_pdfs(scaffolded):
     assert 'https://doi.org/10.1000/example.001' in page and 'Open PDF' not in page
 
 
+def test_not_found_page_links_under_the_github_pages_address(scaffolded, monkeypatch):
+    paths, project = scaffolded
+    monkeypatch.setenv('REVIEW_SITE_URL', 'https://example.github.io/my-review')
+    assert 'site_url' not in site.write_mkdocs_config(paths, project, 'local').read_text(encoding='utf-8')
+    out, _ = site.build_site(paths, project, 'github_pages')
+    page = (out / '404.html').read_text(encoding='utf-8')
+    assert 'href="/my-review/' in page and not re.search(r'(?:href|src)="/(?!my-review/|/)', page)
+
+
 def test_build_needs_a_wiki(classified):
     pytest.importorskip('mkdocs')
     paths, project = classified

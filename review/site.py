@@ -25,6 +25,14 @@ def site_dir(paths: Paths, target: str) -> Path:
     return paths.root / ('site' if target == 'local' else f'site-{target}')
 
 
+def _site_url(target: str) -> dict:
+    """The public address, when the GitHub Pages workflow supplies it (REVIEW_SITE_URL). Every other page links
+    relatively; the "page not found" page cannot, because it is shown at whatever address was mistyped. Without
+    the address its links point at the server root, which is not where a project site lives."""
+    url = os.environ.get('REVIEW_SITE_URL', '').strip()
+    return {'site_url': url} if url and target == 'github_pages' else {}
+
+
 def write_mkdocs_config(paths: Paths, project: Project, target: str) -> Path:
     if target not in TARGETS:
         raise PipelineError(f"Unknown site target '{target}'. Choose one of: {', '.join(TARGETS)}")
@@ -37,6 +45,7 @@ def write_mkdocs_config(paths: Paths, project: Project, target: str) -> Path:
         'docs_dir': 'wiki',
         'site_dir': site_dir(paths, target).name,
         'use_directory_urls': False,   # page.html URLs keep relative PDF and graph links working
+        **_site_url(target),
         'theme': {'name': 'material',
                   'features': ['navigation.tabs', 'navigation.sections', 'navigation.top',
                                'search.highlight', 'search.suggest', 'content.tables'],
