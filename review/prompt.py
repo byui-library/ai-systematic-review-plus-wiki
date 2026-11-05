@@ -4,7 +4,7 @@ Every saved decision records two fingerprints: the prompt it was made with (rese
 eligibility criteria, tier definitions, decision rules) and the paper fields the AI was shown. A decision stays valid while
 both still match, so adding an export or re-running the keyword prescreen never discards AI work, but
 editing the criteria or receiving new information about a paper (such as its abstract) does.
-With Jev screening, the fingerprint also covers the questions, thresholds and tier rules.
+With Jev screening, the fingerprint also covers the Jev model, questions, thresholds and tier rules.
 """
 from __future__ import annotations
 
@@ -57,8 +57,9 @@ def _digest(text: str) -> str:
 
 
 def screening_spec(project: Project) -> str:
-    """The Jev questions, thresholds and tier rules, as text that changes whenever any of them changes."""
+    """The Jev model, questions, thresholds and tier rules, as text that changes whenever any of them changes."""
     return json.dumps({'questions': project.screening['questions'], 'thresholds': project.thresholds,
+                       'model': project.screening['model'],
                        'rules': project.tier_rules}, sort_keys=True, ensure_ascii=False)
 
 

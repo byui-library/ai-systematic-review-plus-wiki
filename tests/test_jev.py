@@ -480,3 +480,18 @@ def test_screen_uses_the_configured_model_and_closes_its_client(prescreened, stu
     sdk = stub_sdk['clients'][0]
     assert sdk.model == 'jev-1.14.0' and sdk.closed and out['model'] == 'jev-1.14.0'
     assert all(e['model'] == 'jev-1.14.0' for e in state.load_checkpoint(paths).values())
+
+
+def test_changing_the_model_retires_decisions_and_cached_answers(prescreened):
+    paths, _ = prescreened
+    old = use_jev(paths)
+    first = FakeJev({})
+    jev.screen(paths, old, client=first)
+    new = use_jev(paths, model='jev-1.13.0')
+    assert prompt_fingerprint(new) != prompt_fingerprint(old)
+    assert classify_remaining(paths, new) == len(candidates(paths))
+    second = FakeJev({})
+    second.model = 'jev-1.13.0'
+    out = jev.screen(paths, new, client=second)
+    assert len(second.calls) == len(first.calls) and out['asked'] == len(candidates(paths))
+    assert all(e['model'] == 'jev-1.13.0' for e in state.load_checkpoint(paths).values())
