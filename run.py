@@ -311,26 +311,34 @@ def cmd_publish(args, paths: Paths) -> None:
 
 
 def cmd_demo(args, paths: Paths) -> None:
-    workspace = Path.cwd() / 'demo-workspace'
+    workspace = Path.cwd() / DEMO_ROOT[1]
     if args.fill_validation:
         filled = demo.fill_validation(Paths(workspace))
         print(f"Typed the demo's human tiers into {filled} rows of demo-workspace/data/validation.xlsx.")
         print('Next step: py run.py --root demo-workspace validate --score')
         return
     demo.install_demo(workspace, force=args.force)
-    root = '--root demo-workspace'
     print('The demo review is installed in demo-workspace/. Try each stage (your own review is not touched):')
-    for step in (f'py run.py {root} import',
-                 f'py run.py {root} prescreen',
-                 f'py run.py {root} classify --save demo-workspace/demo/decisions.json --tool Demo --model reference-decisions',
-                 f'py run.py {root} validate --draw',
-                 'py run.py demo --fill-validation',
-                 f'py run.py {root} validate --score',
-                 f'py run.py {root} report',
-                 f'py run.py {root} wiki --scaffold',
-                 f'py run.py {root} site'):
-        print(f'  {step}')
+    for step in (*DEMO_STEPS, DEMO_LOCAL_SITE):
+        print(f"  py run.py {' '.join(step)}")
     print('What each step shows: demo-workspace/demo/README.md')
+
+
+DEMO_ROOT = ['--root', 'demo-workspace']
+# The demo, stage by stage, as `py run.py demo` prints it, before its local website (DEMO_LOCAL_SITE).
+# tools/build_demo_site.py runs the same steps and then builds the public website instead.
+DEMO_STEPS = (
+    [*DEMO_ROOT, 'import'],
+    [*DEMO_ROOT, 'prescreen'],
+    [*DEMO_ROOT, 'classify', '--save', 'demo-workspace/demo/decisions.json', '--tool', 'Demo',
+     '--model', 'reference-decisions'],
+    [*DEMO_ROOT, 'validate', '--draw'],
+    ['demo', '--fill-validation'],
+    [*DEMO_ROOT, 'validate', '--score'],
+    [*DEMO_ROOT, 'report'],
+    [*DEMO_ROOT, 'wiki', '--scaffold'],
+)
+DEMO_LOCAL_SITE = [*DEMO_ROOT, 'site']
 
 
 def build_parser() -> argparse.ArgumentParser:

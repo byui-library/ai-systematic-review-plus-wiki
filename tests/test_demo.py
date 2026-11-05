@@ -49,7 +49,8 @@ def test_demo_will_not_overwrite_without_force(tmp_path, monkeypatch, capsys):
 
 def test_demo_files_identify_no_one():
     text = '\n'.join(p.read_text(encoding='utf-8', errors='replace') for p in DEMO.rglob('*') if p.is_file())
-    text += (Path(__file__).resolve().parent.parent / 'tools/build_demo.py').read_text(encoding='utf-8')
+    for tool in ('build_demo.py', 'build_demo_site.py'):   # the second feeds the public demo website
+        text += (Path(__file__).resolve().parent.parent / 'tools' / tool).read_text(encoding='utf-8')
     assert not re.search(r'[A-Za-z]:[\\/]Users[\\/]|/Users/[a-z]', text)        # no local paths
     blocklist = [w.strip() for w in os.environ.get('REVIEW_DEMO_BLOCKLIST', '').split(',') if w.strip()]
     for word in blocklist:   # maintainers set this locally to the reference project's names
