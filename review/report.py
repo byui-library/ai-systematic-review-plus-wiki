@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import textwrap
 from collections import Counter
 from datetime import date
 
@@ -108,6 +109,22 @@ def build_excel(paths: Paths, project: Project, stats: dict, data: dict, validat
     save_workbook(wb, paths.results_xlsx)
 
 
+DPI = 200   # the flowchart PNG's resolution
+
+
+def _wrap(text: str, width: int) -> str:
+    """Wrap long lines so one long tier label cannot make a box very wide. A count stays with its label."""
+    out = []
+    for line in text.split('\n'):
+        label, sep, count = line.rpartition(': ')
+        if sep and count.isascii() and count.isdigit():
+            wrapped = textwrap.wrap(label, max(width - len(sep + count), 10)) or ['']
+            out.append('\n'.join(wrapped[:-1] + [wrapped[-1] + sep + count]))
+        else:
+            out.append(textwrap.fill(line, width) or line)
+    return '\n'.join(out)
+
+
 def build_prisma(paths: Paths, project: Project, stats: dict, data: dict) -> None:
     import matplotlib
     matplotlib.use('Agg')
@@ -115,40 +132,83 @@ def build_prisma(paths: Paths, project: Project, stats: dict, data: dict) -> Non
 
     inc = Counter(r['tier'] for r in data['included'])
     exc = Counter(r['tier'] for r in data['excluded'])
-    sources = '\n'.join(f'{s}: {n}' for s, n in stats.get('per_source_raw', {}).items())
+    sources = ''.join(f'\n{s}: {n}' for s, n in stats.get('per_source_raw', {}).items())
     left = [
-        f"Records identified\n(n = {stats.get('total_raw', 0)})\n{sources}",
+        f"Records identified\n(n = {stats.get('total_raw', 0)}){sources}",
         f"Unique records screened\n(n = {stats.get('unique', 0)})",
         f"Records passing filters\n(n = {stats.get('after_prefilter', 0)})",
         f"Records screened by AI\n(n = {len(data['included']) + len(data['excluded'])})",
-        f"Studies included\n(n = {len(data['included'])})\n"
-        + '\n'.join(f'{t.label}: {inc.get(t.id, 0)}' for t in project.tiers if t.included),
+        f"Studies included\n(n = {len(data['included'])})"
+        + ''.join(f'\n{t.label}: {inc.get(t.id, 0)}' for t in project.tiers if t.included),
     ]
     right = [
         f"Duplicates removed\n(n = {stats.get('duplicates_removed', 0)})",
         f"Excluded by type, language,\nor missing abstract\n(n = {stats.get('prefilter_excluded', 0)})",
         f"Excluded by keyword prescreen\n(n = {stats.get('prescreen_excluded', 0)})",
-        f"Excluded by AI screening\n(n = {len(data['excluded'])})\n"
-        + '\n'.join(f'{t.label}: {exc.get(t.id, 0)}' for t in project.tiers if not t.included),
+        f"Excluded by AI screening\n(n = {len(data['excluded'])})"
+        + ''.join(f'\n{t.label}: {exc.get(t.id, 0)}' for t in project.tiers if not t.included),
     ]
-    fig, ax = plt.subplots(figsize=(10, 12))
-    ax.set_xlim(0, 10)
-    ax.set_ylim(0, 12)
+
+    fig, ax = plt.subplots(dpi=DPI)   # measure at the resolution the chart is saved at
+    try:
+        _draw_prisma(fig, ax, project.flow_title, left, right)
+        fig.savefig(paths.prisma_png, dpi=DPI, bbox_inches='tight')
+    finally:
+        plt.close(fig)
+
+
+def _draw_prisma(fig, ax, title_text: str, left: list[str], right: list[str]) -> None:
+    fig.subplots_adjust(0, 0, 1, 1)
     ax.axis('off')
-    ys = [10.6, 8.3, 6.2, 4.1, 1.6]
-    main_box = dict(boxstyle='round,pad=0.6', fc='#E8F0FB', ec='#1F4E79')
-    side_box = dict(boxstyle='round,pad=0.5', fc='#F5F5F5', ec='#999999')
-    for i, (y, text) in enumerate(zip(ys, left)):
-        ax.text(3, y, text, ha='center', va='center', fontsize=10, bbox=main_box)
-        if i < len(right):
-            mid = (y + ys[i + 1]) / 2
-            ax.annotate('', xy=(3, ys[i + 1] + 0.75), xytext=(3, y - 0.75),
-                        arrowprops=dict(arrowstyle='->', color='#1F4E79'))
-            ax.annotate('', xy=(5.6, mid), xytext=(3, mid), arrowprops=dict(arrowstyle='->', color='#999999'))
-            ax.text(7.7, mid, right[i], ha='center', va='center', fontsize=9, bbox=side_box)
-    ax.text(5, 11.9, project.flow_title, ha='center', va='center', fontsize=13, fontweight='bold')
-    fig.savefig(paths.prisma_png, dpi=200, bbox_inches='tight')
-    plt.close(fig)
+    # parse_math=False: a tier label such as "Cost $5 to $10" is text, not a formula.
+    plain = dict(ha='center', va='center', parse_math=False)
+    title = ax.text(0, 0, title_text, fontsize=13, fontweight='bold', **plain)
+    main_style = dict(boxstyle='round,pad=0.6', fc='#E8F0FB', ec='#1F4E79')
+    side_style = dict(boxstyle='round,pad=0.5', fc='#F5F5F5', ec='#999999')
+    mains = [ax.text(0, 0, _wrap(t, 30), fontsize=10, bbox=main_style, gid='prisma-main', **plain) for t in left]
+    sides = [ax.text(0, 0, _wrap(t, 32), fontsize=9, bbox=side_style, gid='prisma-side', **plain) for t in right]
+
+    # Draw once to measure every box (they grow with one line per database and per tier), then place them.
+    # One data unit is one inch, so the measurements are positions.
+    fig.canvas.draw()
+
+    def size(artist):
+        box = artist.get_window_extent()
+        return box.width / fig.dpi, box.height / fig.dpi
+
+    title_w, title_h = size(title)
+    main_sizes = [size(t.get_bbox_patch()) for t in mains]
+    side_sizes = [size(t.get_bbox_patch()) for t in sides]
+    main_w = max(w for w, _ in main_sizes)
+    side_w = max(w for w, _ in side_sizes)
+    columns = main_w + 1.5 + side_w
+    width = max(columns, title_w) + 0.6
+    main_x = (width - columns) / 2 + main_w / 2   # the columns are centred under a title wider than them
+    side_x = main_x + main_w / 2 + 1.5 + side_w / 2
+
+    y = -(title_h + 0.5)   # top of the first box, below the title
+    for i, (_, h) in enumerate(main_sizes):
+        mains[i].set_position((main_x, y - h / 2))
+        if i < len(sides):
+            gap = max(1.0, side_sizes[i][1] + 0.5)
+            sides[i].set_position((side_x, y - h - gap / 2))
+            y -= h + gap
+        else:
+            y -= h
+    height = -y + 0.3
+    title.set_position((width / 2, -(title_h / 2 + 0.2)))
+    fig.set_size_inches(width, height)
+    ax.set_xlim(0, width)
+    ax.set_ylim(-height, 0)
+
+    # Arrows are anchored to the boxes themselves (fractions of each box), so their ends sit on the real edges
+    # at whatever resolution the chart is saved.
+    for i, side in enumerate(sides):
+        upper, lower, patch = mains[i].get_bbox_patch(), mains[i + 1].get_bbox_patch(), side.get_bbox_patch()
+        ax.annotate('', xy=(0.5, 1), xycoords=lower, xytext=(0.5, 0), textcoords=upper,
+                    arrowprops=dict(arrowstyle='->', color='#1F4E79', shrinkA=0, shrinkB=0))
+        ax.annotate('', xy=(0, 0.5), xycoords=patch, xytext=(main_x, 0.5), textcoords=('data', patch),
+                    arrowprops=dict(arrowstyle='->', color='#999999', shrinkA=0, shrinkB=0))
 
 
 def run_report(paths: Paths, project: Project) -> dict:

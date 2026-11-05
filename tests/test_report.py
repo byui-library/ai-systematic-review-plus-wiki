@@ -41,6 +41,80 @@ def test_prisma_only_when_enabled(classified):
     assert paths.prisma_png.stat().st_size > 1000
 
 
+@pytest.mark.parametrize('n_sources, labels, n_included', [
+    (1, None, 0),
+    (5, None, 0),
+    (8, [f'Tier {i} with a rather long descriptive label' for i in range(1, 7)], 3),   # tall boxes, long labels
+    (20, ['Included', 'W' * 60, 'ÄÖÜ ' * 12, 'Ж' * 40, 'Cost $5 to $10', 'Another tier'], 1),   # wide glyphs, $
+])
+def test_prisma_boxes_never_collide(classified, monkeypatch, n_sources, labels, n_included):
+    """Boxes grow with one line per database and per tier: they must stack without touching each other or the
+    title, stay apart side to side, stay inside the chart, and every arrow must be anchored to its boxes."""
+    import matplotlib.pyplot as plt
+    paths, project = classified
+    if labels:
+        data = yaml.safe_load(paths.project_yaml.read_text(encoding='utf-8'))
+        data['tiers'] = [{'id': i, 'label': label, 'included': i <= n_included, 'definition': 'x'}
+                         for i, label in enumerate(labels, 1)]
+        paths.project_yaml.write_text(yaml.safe_dump(data, allow_unicode=True), encoding='utf-8')
+        project = load_project(paths.root)
+    close = plt.close
+    monkeypatch.setattr(plt, 'close', lambda fig=None: None)   # keep the figure open to inspect it
+    records = {'included': [{'tier': t.id} for t in project.tiers if t.included],
+               'excluded': [{'tier': t.id} for t in project.tiers if not t.included]}
+    try:
+        report.build_prisma(paths, project, {'per_source_raw': {f'db{i}': i for i in range(n_sources)}}, records)
+        fig = plt.gcf()
+        fig.canvas.draw()
+        ax = fig.axes[0]
+        chart = ax.get_window_extent()
+        title = next(t for t in ax.texts if t.get_text() == project.flow_title).get_window_extent()
+        boxed = [t for t in ax.texts if t.get_bbox_patch() is not None]
+        top_down = lambda p: -p.get_window_extent().y1   # noqa: E731
+        main = sorted((t.get_bbox_patch() for t in boxed if t.get_gid() == 'prisma-main'), key=top_down)
+        side = sorted((t.get_bbox_patch() for t in boxed if t.get_gid() == 'prisma-side'), key=top_down)
+        assert fig.dpi == report.DPI   # checked at the resolution the PNG is saved at
+        assert len(main) == 5 and len(side) == 4
+        assert title.y0 > main[0].get_window_extent().y1
+        assert max(m.get_window_extent().x1 for m in main) < min(s.get_window_extent().x0 for s in side)
+        for p in main + side:
+            box = p.get_window_extent()
+            assert chart.x0 <= box.x0 and box.x1 <= chart.x1 and chart.y0 <= box.y0 and box.y1 <= chart.y1
+        for i, s in enumerate(side):
+            upper, lower, box = (main[i].get_window_extent(), main[i + 1].get_window_extent(), s.get_window_extent())
+            assert upper.y0 > box.y1 > box.y0 > lower.y1   # beside the gap between the two boxes it comes from
+        arrows = [a for a in ax.texts if getattr(a, 'arrow_patch', None) is not None]
+        down = [a for a in arrows if a.xycoords in main]
+        assert [(main.index(a.anncoords), main.index(a.xycoords)) for a in down] == [(i, i + 1) for i in range(4)]
+        assert sorted(side.index(a.xycoords) for a in arrows if a.xycoords in side) == [0, 1, 2, 3]
+        assert all(a.arrow_patch.shrinkA == a.arrow_patch.shrinkB == 0 for a in arrows)
+    finally:
+        close('all')
+
+
+def test_prisma_columns_centred_under_a_wide_title():
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(dpi=report.DPI)
+    try:
+        report._draw_prisma(fig, ax, 'A very long flow diagram title ' * 4, ['A\n(n = 1)'] * 5, ['B\n(n = 1)'] * 4)
+        fig.canvas.draw()
+        boxes = [t.get_bbox_patch().get_window_extent() for t in ax.texts if t.get_bbox_patch() is not None]
+        chart = ax.get_window_extent()
+        left_gap, right_gap = min(b.x0 for b in boxes) - chart.x0, chart.x1 - max(b.x1 for b in boxes)
+        assert left_gap == pytest.approx(right_gap, abs=2)
+    finally:
+        plt.close(fig)
+
+
+def test_prisma_wrap_keeps_counts_with_labels():
+    assert report._wrap('A tier label that is far too long to fit: 12', 30).endswith('fit: 12')
+    assert all(line.strip() != '12' for line in report._wrap('x' * 29 + ': 12', 30).split('\n'))
+    assert report._wrap('Records identified\n(n = 5)', 30) == 'Records identified\n(n = 5)'
+    assert report._wrap('A note in ref: ²', 30) == 'A note in ref: ²'   # only plain digits count as a count
+
+
 def test_validation_sheet_after_scoring(classified):
     paths, project = classified
     validate.draw_sample(paths, project)
