@@ -14,6 +14,9 @@ def test_the_site_tool_runs_the_printed_demo_steps(tmp_path, monkeypatch, capsys
     steps = tool.steps()
     assert steps[1:1 + len(DEMO_STEPS)] == list(DEMO_STEPS)
     assert [s for s in steps if 'site' in s] == [[*DEMO_ROOT, 'site', '--target', 'github_pages']]   # never local
+    # The home page is rebuilt after the pages it lists exist, and just before the public build.
+    assert steps[-3:] == [[*DEMO_ROOT, 'graph'], [*DEMO_ROOT, 'wiki', '--index'],
+                          [*DEMO_ROOT, 'site', '--target', 'github_pages']]
 
 
 def test_public_demo_site_has_every_page_type_and_no_pdfs(tmp_path, monkeypatch, capsys):
@@ -25,6 +28,13 @@ def test_public_demo_site_has_every_page_type_and_no_pdfs(tmp_path, monkeypatch,
     for page in ('index.html', 'tables/graph.html', 'tables/figures.html', '404.html'):
         assert (site / page).exists(), page
     assert len(list((site / 'papers').rglob('*.html'))) == EXPECTED['included']
+    # The published home page's own text (not the site navigation, which lists every page anyway) links to the
+    # tables, figures and graph made after `wiki --scaffold` first wrote it.
+    home = (site / 'index.html').read_text(encoding='utf-8')
+    assert 'id="tables-and-figures"' in home
+    listed = home.split('id="tables-and-figures"')[1].split('<h2')[0]
+    for page in ('tables/figures.html', 'tables/knowledge-graph.html', 'tables/tier1-extraction.html'):
+        assert f'href="{page}"' in listed, page
     assert not list(site.rglob('*.pdf')) and not list(site.rglob('*.PDF'))
     assert 'href="/demo-review/' in (site / '404.html').read_text(encoding='utf-8')
     assert 'public demo website is in demo-workspace/site-github_pages/' in capsys.readouterr().out

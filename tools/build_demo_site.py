@@ -23,8 +23,9 @@ from run import DEMO_ROOT, DEMO_STEPS, main  # noqa: E402
 
 WORKSPACE = Path(DEMO_ROOT[1])
 SITE = WORKSPACE / site_dir(Paths(WORKSPACE), 'github_pages').name
-# After the printed demo steps: the extraction tables, figures, and knowledge graph, then the public build.
-EXTRAS = (['wiki', '--tables'], ['figures'], ['graph'], ['site', '--target', 'github_pages'])
+# After the printed demo steps: the extraction tables, figures, and knowledge graph; the home page again, so it
+# lists them (wiki --scaffold wrote it before they existed); then the public build.
+EXTRAS = (['wiki', '--tables'], ['figures'], ['graph'], ['wiki', '--index'], ['site', '--target', 'github_pages'])
 
 
 def steps(force: bool = False) -> list[list[str]]:
