@@ -52,7 +52,7 @@ def collect(paths: Paths, project: Project) -> dict:
         answers = _jev_answers(project, entry, cache, c) if cache is not None else {}
         rows.append({**c, 'tier': tier.id, 'tier_label': tier.label, 'included': tier.included,
                      'score': entry['score'], 'reason': entry['reason'],    # sources stay a list; writers join it
-                     'jev': answers, **{f'jev:{q}': p for q, p in answers.items()}})
+                     **{f'jev:{q}': p for q, p in answers.items()}})
     rows.sort(key=lambda r: (r['tier'], -r['score'], r.get('title', '')))
     return {'included': [r for r in rows if r['included']],
             'excluded': [r for r in rows if not r['included']],

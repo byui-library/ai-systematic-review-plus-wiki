@@ -26,18 +26,40 @@ def _criteria_block(project: Project) -> str:
     return f'{project.criteria_name.upper()} CRITERIA:\n' + '\n'.join(lines)
 
 
+def _rule_text(alternatives: list[list[str]]) -> str:
+    """[['a', 'not b'], ['c']] -> '(a AND not b) OR c'."""
+    parts = [' AND '.join(str(c).strip() for c in alt) for alt in alternatives]
+    return ' OR '.join(f'({p})' if len(alternatives) > 1 and len(alt) > 1 else p
+                       for p, alt in zip(parts, alternatives))
+
+
+def _jev_rules_block(project: Project) -> str:
+    """The questions and tier rules Jev applied, so the assistant decides escalated papers the same way."""
+    lines = ['JEV SCREENING RULES (these papers were escalated by the TypeSafe Jev model; apply the same rules):',
+             '  Questions:']
+    lines += [f'    {q}: {text}' for q, text in project.screening['questions'].items()]
+    for tier_id, alternatives in project.tier_rules:
+        lines.append(f'  Tier {tier_id}: every other paper' if alternatives is None
+                     else f'  Tier {tier_id} if: {_rule_text(alternatives)}')
+    lines.append('  Answer each question yourself from the paper, then give the highest tier whose rule your answers '
+                 'meet. Use the tier definitions above to judge borderline answers.')
+    return '\n'.join(lines) + '\n\n'
+
+
 def build_prompt(project: Project) -> str:
     tiers = '\n\n'.join(
         f"TIER {t.id} — {t.label.upper()} ({'INCLUDED' if t.included else 'EXCLUDED'}):\n  {t.definition}"
         for t in project.tiers)
     ids = ', '.join(str(i) for i in project.tier_ids)
     choices = '|'.join(str(i) for i in project.tier_ids)
+    jev_rules = _jev_rules_block(project) if project.screening['method'] == 'jev' else ''   # assistant: unchanged
     return (
         f'You are a research librarian screening papers for a {project.review_noun}.\n'
         f'Apply the research question, {project.criteria_name} criteria, and tier definitions below exactly.\n\n'
         f'RESEARCH QUESTION:\n  {project.question}\n\n'
         f'{_criteria_block(project)}\n\n'
         f'TIERS:\n\n{tiers}\n\n'
+        f'{jev_rules}'
         f'For every paper choose exactly one tier ({ids}), a relevance score from 1 to 100 within that\n'
         'tier (100 = textbook example, 50 = typical member, 1 = barely qualifies), and one concise\n'
         'sentence explaining the decision.\n\n'

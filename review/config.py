@@ -423,6 +423,7 @@ def _normalise_criteria(c: dict, legacy_rows: list[tuple[str, str]] | None = Non
 
 
 QUESTION_ID = re.compile(r'^[a-z][a-z0-9_]*$')
+JEV_MODEL = re.compile(r'^jev-\d+\.\d+\.\d+$')
 RESERVED_WORDS = "'yes', 'no', 'on', 'off', 'true' and 'false' can't be question ids in YAML; choose another, such as is_on"
 
 
@@ -471,7 +472,7 @@ def _screening_problems(raw: dict) -> list[str]:
             elif not isinstance(v, str) or not v.strip():
                 p.append(f"screening question '{k}' needs its text")
         model = s.get('model')
-        if not isinstance(model, str) or not model.strip() or model.strip().endswith(('-latest', '-preview')):
+        if not isinstance(model, str) or not JEV_MODEL.match(model.strip()):
             p.append('screening.model must name an exact Jev version such as jev-1.14.0, '
                      'so the methods section can report it')
     p += _threshold_problems(s.get('thresholds'))
@@ -620,6 +621,8 @@ def load_project(root: Path | str) -> Project:
     if raw['wiki'].get('deep_tiers') is not None:
         raw['wiki']['deep_tiers'] = [whole_number(d) for d in raw['wiki']['deep_tiers']]
     raw['criteria'] = _normalise_criteria(raw['criteria'], legacy_rows)
+    if isinstance(raw['screening'].get('model'), str):
+        raw['screening']['model'] = raw['screening']['model'].strip()   # compared as-is with the model Jev reports
 
     tiers = tuple(sorted(
         (Tier(t['id'], str(t['label']).strip(), bool(t.get('included', False)), str(t['definition']).strip())

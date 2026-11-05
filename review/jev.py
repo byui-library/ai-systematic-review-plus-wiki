@@ -7,7 +7,6 @@ asks Jev nothing new.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 
@@ -16,7 +15,7 @@ from .config import Paths, Project
 from .env import load_env
 from .errors import PipelineError
 from .io import now_iso, read_json, write_json
-from .prompt import paper_fingerprint, prompt_fingerprint
+from .prompt import _digest, paper_fingerprint, prompt_fingerprint
 from .rules import evaluate
 
 TOOL = 'TypeSafe Jev'
@@ -37,8 +36,7 @@ def paper_state(paper: dict) -> dict:
 
 def state_digest(paper: dict) -> str:
     """Changes exactly when what Jev reads changes (a new journal name, say, does not)."""
-    text = json.dumps(paper_state(paper), sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(text.encode('utf-8')).hexdigest()[:12]
+    return _digest(json.dumps(paper_state(paper), sort_keys=True, ensure_ascii=False))
 
 
 class Client:

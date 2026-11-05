@@ -418,10 +418,34 @@ def test_needs_the_api_key_and_jev_method(prescreened, monkeypatch):
         jev.screen(paths, use_jev(paths))
 
 
-@pytest.mark.parametrize('model', ['jev-latest', 'jev-2-preview', ''])
+@pytest.mark.parametrize('model', ['jev-latest', 'jev-2-preview', '', 'jev', 'jev-1', 'jev-1.14', 'jev-1.14.0b'])
 def test_model_must_be_an_exact_version(workspace, model):
-    with pytest.raises(ConfigError, match='screening.model must name an exact Jev version'):
+    with pytest.raises(ConfigError) as err:
         use_jev(workspace, model=model)
+    assert ('screening.model must name an exact Jev version such as jev-1.14.0, so the methods section can '
+            'report it') in str(err.value)
+
+
+def test_model_is_stored_stripped(workspace):
+    assert use_jev(workspace, model=' jev-1.14.0 ').screening['model'] == 'jev-1.14.0'
+
+
+def test_jev_prompt_carries_the_questions_and_rules(workspace):
+    rules = {1: [['team_sport', 'structure']], 2: [['team_sport', 'not structure'], ['structure']],
+             3: [['team_sport']], 4: None}
+    text = build_prompt(use_jev(workspace, rules=rules))
+    assert 'JEV SCREENING RULES (these papers were escalated by the TypeSafe Jev model; apply the same rules):' in text
+    for q, question in QUESTIONS.items():
+        assert f'    {q}: {question}\n' in text
+    assert '  Tier 1 if: team_sport AND structure\n' in text
+    assert '  Tier 2 if: (team_sport AND not structure) OR structure\n' in text
+    assert '  Tier 3 if: team_sport\n' in text and '  Tier 4: every other paper\n' in text
+    assert 'give the highest tier whose rule your answers meet' in text
+    assert text.index('TIER 4') < text.index('JEV SCREENING RULES') < text.index('Respond with JSON only')
+
+
+def test_assistant_prompt_has_no_jev_rules(workspace):
+    assert 'JEV SCREENING RULES' not in build_prompt(load_project(workspace.root))
 
 
 def test_default_model_is_pinned(workspace):

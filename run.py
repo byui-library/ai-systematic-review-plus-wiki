@@ -53,7 +53,7 @@ if __name__ == '__main__':
 try:
     from review import (classify, demo, figures, graph, jev, pdfs, publish, report, site, stages,  # noqa: E402
                         state, tables, validate, wiki)
-    from review.config import Paths, load_project, summary  # noqa: E402
+    from review.config import Paths, _count, load_project, summary  # noqa: E402
     from review.errors import PipelineError  # noqa: E402
 except ImportError as exc:
     sys.exit(f'A package this template needs is missing ({exc}).\n'
@@ -87,19 +87,15 @@ def cmd_prescreen(args, paths: Paths) -> None:
     print(f"Next step: {state.next_step(paths, 'classify')}")
 
 
-def _papers(n: int) -> str:
-    return f"{n} paper{'' if n == 1 else 's'}"
-
-
 def cmd_classify(args, paths: Paths) -> None:
     project = load_project(paths.root)
     if args.jev:
         out = jev.screen(paths, project)
         prog = classify.progress(paths, project)
         n = len(out['escalated'])
-        print(f"{_papers(out['decided'])} decided by Jev ({out['model']}); {out['asked']} sent to Jev this run "
+        print(f"{_count(out['decided'], 'paper')} decided by Jev ({out['model']}); {out['asked']} sent to Jev this run "
               f"({prog['classified']} of {prog['total']} candidates now have a tier).")
-        print(f"{_papers(n)} {'needs' if n == 1 else 'need'} the AI assistant: Jev was unsure about a question "
+        print(f"{_count(n, 'paper')} {'needs' if n == 1 else 'need'} the AI assistant: Jev was unsure about a question "
               'that decides their tier, or the paper has no abstract.')
         if out['escalated']:
             print(f"Next step: {state.next_step(paths, 'classify')}")
@@ -119,7 +115,7 @@ def cmd_classify(args, paths: Paths) -> None:
             n = len(jev.not_yet_screened(paths, project))
             if n:   # never hand the assistant papers Jev has not looked at
                 raise PipelineError(
-                    f"Run py run.py classify --jev first: {_papers(n)} {'needs' if n == 1 else 'need'} Jev's "
+                    f"Run py run.py classify --jev first: {_count(n, 'paper')} {'needs' if n == 1 else 'need'} Jev's "
                     'answers, or a fresh look at answers already saved (this costs nothing new if only '
                     'thresholds or rules changed). Jev needs TYPESAFE_API_KEY in your .env file. To screen with '
                     'the AI assistant only, set screening.method: assistant in project.yaml.')

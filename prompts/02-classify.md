@@ -36,10 +36,11 @@ If `project.yaml` has `screening.method: jev`, TypeSafe Jev screens first and yo
 
 1. Run `py run.py classify --jev` before the loop above. It asks Jev about every paper and saves the tiers Jev is confident about.
 2. Then follow the loop as usual. Each batch holds only the papers Jev couldn't settle.
-3. If the batch has a `jev_unsure` field, it lists, for each paper id, the questions Jev was unsure about. Judge those points yourself from the paper, and mention them in your `reason`.
-4. `No abstract: Jev was not asked` means the paper has no abstract. Decide from the title and keywords, and say so in your `reason`.
+3. The batch's `prompt` includes a `JEV SCREENING RULES` section: the questions Jev answered and the rule for each tier. Answer every listed question yourself from the paper, then give the highest tier whose rule your answers meet.
+4. If the batch has a `jev_unsure` field, it lists, for each paper id, the questions Jev was unsure about. Judge those points carefully, and mention them in your `reason`.
+5. `No abstract: Jev was not asked` means the paper has no abstract. Decide from the title and keywords, and say so in your `reason`.
 
-Every tier rule is still in the batch's `prompt`. Follow it exactly, as for any other batch.
+Every tier rule, including Jev's, is in the batch's `prompt`. Follow it exactly, as for any other batch.
 
 ## Rules
 
