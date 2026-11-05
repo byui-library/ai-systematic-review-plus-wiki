@@ -95,3 +95,20 @@ def test_tier_rules_are_highest_tier_first_whatever_the_file_order(workspace):
     workspace.project_yaml.write_text(yaml.safe_dump(data, allow_unicode=True), encoding='utf-8')
     project = load_project(workspace.root)
     assert [i for i, _ in project.tier_rules] == [1, 2, 3, 4]
+
+
+from review.prompt import prompt_fingerprint
+
+
+def test_assistant_fingerprint_is_unchanged_by_the_new_defaults(workspace):
+    from review.prompt import _digest, build_prompt
+    project = load_project(workspace.root)
+    assert prompt_fingerprint(project) == _digest(build_prompt(project))
+
+
+def test_changing_a_question_or_rule_changes_the_fingerprint(workspace):
+    a = prompt_fingerprint(use_jev(workspace))
+    b = prompt_fingerprint(use_jev(workspace, {**QUESTIONS, 'structure': 'Is metric structure analysed?'}))
+    c = prompt_fingerprint(use_jev(workspace, rules={**RULES, 3: [['structure']]}))
+    d = prompt_fingerprint(use_jev(workspace, thresholds={'yes_at_least': 0.8, 'no_at_most': 0.2}))
+    assert len({a, b, c, d}) == 4
