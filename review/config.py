@@ -64,6 +64,7 @@ DEFAULTS: dict = {
     'pdfs': {'libkey': True, 'unpaywall': True},
     'site': {'title': '', 'targets': ['local']},
     'classify': {'batch_size': 50},
+    'screening': {'method': 'assistant', 'thresholds': {'yes': 0.7, 'no': 0.3}, 'questions': {}},
     'wiki': {'deep_tiers': None},   # None: the first included tier gets the deep, researcher-confirmed pages
 }
 
@@ -89,6 +90,7 @@ class Paths:
         self.checkpoint = self.data / 'checkpoint.json'
         self.classify_batch = self.data / 'classify_batch.json'
         self.classify_results = self.data / 'classify_results.json'
+        self.jev_answers = self.data / 'jev_answers.json'
         self.validation_xlsx = self.data / 'validation.xlsx'
         self.validation_sample = self.data / 'validation_sample.json'
         self.validation_results = self.data / 'validation_results.json'
@@ -203,6 +205,16 @@ class Project:
     @property
     def outputs(self) -> dict:
         return self.raw['outputs']
+
+    @property
+    def screening(self) -> dict:
+        return self.raw['screening']
+
+    @property
+    def tier_rules(self) -> list[tuple[int, list[list[str]] | None]]:
+        """(tier id, alternatives or None for the catch-all), highest tier first."""
+        by_id = {t['id']: t for t in self.raw['tiers']}
+        return [(t.id, by_id[t.id].get('when')) for t in self.tiers]
 
     @property
     def batch_size(self) -> int:
@@ -404,6 +416,47 @@ def _normalise_criteria(c: dict, legacy_rows: list[tuple[str, str]] | None = Non
             'exclude': [r.strip() for r in c.get('exclude') or []]}
 
 
+QUESTION_ID = re.compile(r'^[a-z][a-z0-9_]*$')
+
+
+def _screening_problems(raw: dict) -> list[str]:
+    s, p = raw['screening'], []
+    if s.get('method') not in ('assistant', 'jev'):
+        return ['screening.method must be assistant or jev']
+    if s['method'] == 'assistant':
+        return []
+    questions = s.get('questions')
+    if not isinstance(questions, dict) or not questions:
+        return ['screening.questions must list at least one question, for example: team_sport: Is it a team sport?']
+    if any(not isinstance(k, str) or not QUESTION_ID.match(k) for k in questions):
+        p.append('screening question ids must be lowercase words joined by _, for example: team_sport')
+    if any(not str(v or '').strip() for v in questions.values()):
+        p.append('every screening question needs its text')
+    t = s.get('thresholds') or {}
+    ok = all(isinstance(t.get(k), (int, float)) and not isinstance(t.get(k), bool) for k in ('yes', 'no'))
+    if not ok or not 0 < t['no'] < t['yes'] < 1:
+        p.append('screening.thresholds need 0 < no < yes < 1, for example: {yes: 0.7, no: 0.3}')
+    tiers = sorted((t for t in raw.get('tiers') or [] if isinstance(t, dict) and whole_number(t.get('id')) is not None),
+                   key=lambda t: whole_number(t['id']))
+    for i, tier in enumerate(tiers):
+        when, last = tier.get('when'), i == len(tiers) - 1
+        if last and when is not None:
+            p.append(f"the last tier ({tier['id']}) catches everything else, so it must not have when:")
+        if not last and when is None:
+            p.append(f"tier {tier['id']} needs when: (only the last tier catches everything else)")
+        if when is None:
+            continue
+        if not isinstance(when, list) or not when or any(not isinstance(a, list) or not a for a in when):
+            p.append(f"tier {tier['id']} when: must be a list of lists, for example: [[team_sport, wearable]]")
+            continue
+        for cond in (c for a in when for c in a):
+            cond = str(cond).strip()
+            qid = cond[4:].strip() if cond.startswith('not ') else cond
+            if qid not in questions:
+                p.append(f"tier {tier['id']} uses unknown question '{qid}'")
+    return p
+
+
 def _problems(raw: dict) -> list[str]:
     p: list[str] = []
     if not str(raw['project'].get('title') or '').strip():
@@ -480,6 +533,7 @@ def _problems(raw: dict) -> list[str]:
     pct = raw['validation'].get('sample_percent')
     if not isinstance(pct, (int, float)) or isinstance(pct, bool) or not 0 < pct <= 100:
         p.append('validation.sample_percent must be a number between 1 and 100')
+    p += _screening_problems(raw)
     return p
 
 
