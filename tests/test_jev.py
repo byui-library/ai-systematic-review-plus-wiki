@@ -495,3 +495,113 @@ def test_changing_the_model_retires_decisions_and_cached_answers(prescreened):
     out = jev.screen(paths, new, client=second)
     assert len(second.calls) == len(first.calls) and out['asked'] == len(candidates(paths))
     assert all(e['model'] == 'jev-1.13.0' for e in state.load_checkpoint(paths).values())
+
+
+def test_next_batch_hands_out_escalated_papers_with_their_unsure_questions(prescreened):
+    from review import classify
+    paths, _ = prescreened
+    project = use_jev(paths)
+    ids = [c['id'] for c in candidates(paths)]
+    jev.screen(paths, project, client=FakeJev(by_title(paths, {ids[1]: {'team_sport': 0.95, 'structure': 0.5}})))
+    batch = classify.next_batch(paths, project)
+    assert [p['id'] for p in batch['papers']] == [ids[1]]
+    assert batch['jev_unsure'] == {ids[1]: [QUESTIONS['structure']]}
+
+
+def test_assistant_batches_have_no_jev_field(prescreened):
+    from review import classify
+    paths, project = prescreened
+    assert 'jev_unsure' not in classify.next_batch(paths, project)
+
+
+def test_next_batch_before_jev_screening_is_refused(prescreened, capsys):
+    from run import main
+    paths, _ = prescreened
+    use_jev(paths)
+    assert main(['--root', str(paths.root), 'classify', '--next-batch']) == 1
+    err = capsys.readouterr().err
+    assert 'Run py run.py' in err and 'classify --jev first' in err   # main() adds --root to the hint
+    assert f'{len(candidates(paths))} papers have not been screened by Jev yet' in err
+
+
+def test_not_yet_screened_includes_papers_jev_would_now_decide(prescreened):
+    paths, _ = prescreened
+    project = use_jev(paths)
+    ids = [c['id'] for c in candidates(paths)]
+    edit_candidates(paths, lambda c: c.update(abstract='') if c['id'] == ids[0] else None)
+    assert ids[0] not in jev.not_yet_screened(paths, project)
+    jev.screen(paths, project, client=FakeJev(by_title(paths, {ids[1]: {'team_sport': 0.95, 'structure': 0.5}})))
+    assert jev.not_yet_screened(paths, project) == []
+    looser = use_jev(paths, thresholds={'yes_at_least': 0.4, 'no_at_most': 0.3})   # ids[1] now decided by Jev
+    assert ids[1] in jev.not_yet_screened(paths, looser)
+
+
+def test_classify_jev_command(prescreened, monkeypatch, capsys):
+    from run import main
+    paths, _ = prescreened
+    use_jev(paths)
+    monkeypatch.setattr(jev, '_client', lambda paths, model: FakeJev({}))
+    assert main(['--root', str(paths.root), 'classify', '--jev']) == 0
+    out = capsys.readouterr().out
+    assert 'decided by Jev (jev-1.14.0)' in out and '0 need the AI assistant' in out
+    assert 'Classification complete' in out
+
+
+def test_workbook_has_jev_columns(prescreened):
+    from openpyxl import load_workbook
+    from review import report
+    paths, _ = prescreened
+    project = use_jev(paths)
+    jev.screen(paths, project, client=FakeJev({}, default=0.1234))
+    report.run_report(paths, project)
+    rows = list(load_workbook(paths.results_xlsx)['Excluded'].iter_rows(values_only=True))
+    header = list(rows[0])
+    assert header[0] == 'Consider promoting?'
+    assert 'Jev: team_sport' in header and 'Jev: structure' in header
+    assert rows[1][header.index('Jev: team_sport')] == 0.12
+
+
+def test_assistant_workbook_has_no_jev_columns(classified):
+    from openpyxl import load_workbook
+    from review import report
+    paths, project = classified
+    report.run_report(paths, project)
+    wb = load_workbook(paths.results_xlsx)
+    for ws in wb.worksheets[1:]:
+        header = next(ws.iter_rows(values_only=True))
+        assert not any(str(h).startswith('Jev:') for h in header)
+    assert next(wb['Excluded'].iter_rows(values_only=True))[1:] == tuple(t for _, t, _ in report.COLUMNS)
+
+
+def test_client_is_closed_even_when_candidates_are_missing(prescreened, monkeypatch):
+    paths, _ = prescreened
+    project = use_jev(paths)
+    closed = []
+
+    class Closable(FakeJev):
+        def close(self):
+            closed.append(True)
+    monkeypatch.setattr(jev, '_client', lambda paths, model: Closable({}))
+    paths.candidates.unlink()
+    with pytest.raises(PipelineError):
+        jev.screen(paths, project)
+    assert closed == [True]
+
+
+def test_decided_excludes_a_decision_the_merge_dropped(prescreened):
+    paths, _ = prescreened
+    project = use_jev(paths)
+    cands = candidates(paths)
+    first = cands[0]
+    theirs = {'tier': 2, 'score': 70, 'reason': 'Saved by the assistant.', 'tool': 'Claude Code',
+              'model': 'claude-opus-5-5', 'timestamp': 'now', 'prompt': prompt_fingerprint(project),
+              'input': paper_fingerprint(first)}
+
+    class SomeoneSaves(FakeJev):
+        def ask(self, paper_state, questions):
+            if paper_state['title'] == cands[1]['title']:   # Jev has decided cands[0], not yet saved
+                write_json(paths.checkpoint, {**state.load_checkpoint(paths), first['id']: theirs})
+            return super().ask(paper_state, questions)
+    out = jev.screen(paths, project, client=SomeoneSaves({}))
+    assert state.load_checkpoint(paths)[first['id']] == theirs
+    assert out['decided'] == len(cands) - 1

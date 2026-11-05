@@ -98,11 +98,11 @@ def _cached(entry, paper: dict, model: str) -> dict[str, float]:
     return dict(answers) if isinstance(answers, dict) else {}
 
 
-def _merge_into_checkpoint(paths: Paths, fingerprint: str, pending: dict, by_id: dict) -> bool:
+def _merge_into_checkpoint(paths: Paths, fingerprint: str, pending: dict, by_id: dict) -> tuple[list[str], bool]:
     """Write this run's new decisions over a fresh read of the checkpoint, so concurrent saves are kept.
-    Returns True when an earlier entry was replaced (its history is kept)."""
+    Returns (the paper ids written, whether an earlier entry was replaced; its history is kept)."""
     ckpt = state.load_checkpoint(paths)
-    replaced = False
+    written, replaced = [], False
     for pid, entry in pending.items():
         previous = ckpt.get(pid)
         if state.is_current_decision(previous, fingerprint, by_id[pid]):
@@ -111,8 +111,9 @@ def _merge_into_checkpoint(paths: Paths, fingerprint: str, pending: dict, by_id:
             entry = {**entry, 'history': previous.pop('history', []) + [previous]}
             replaced = True
         ckpt[pid] = entry
+        written.append(pid)
     write_json(paths.checkpoint, ckpt)
-    return replaced
+    return written, replaced
 
 
 def screen(paths: Paths, project: Project, client=None, use_cache: bool = True) -> dict:
@@ -126,6 +127,15 @@ def screen(paths: Paths, project: Project, client=None, use_cache: bool = True) 
     owned = client is None
     if owned:
         client = _client(paths, project.screening['model'])
+    try:
+        return _screen(paths, project, client, use_cache)
+    finally:
+        close = getattr(client, 'close', None) if owned else None
+        if close:
+            close()
+
+
+def _screen(paths: Paths, project: Project, client, use_cache: bool) -> dict:
     questions, thresholds, rules = project.screening['questions'], project.thresholds, project.tier_rules
     fingerprint = prompt_fingerprint(project)
     cands = state.load_candidates(paths)
@@ -136,10 +146,12 @@ def screen(paths: Paths, project: Project, client=None, use_cache: bool = True) 
     decided, asked, escalated, replaced = 0, 0, {}, False
 
     def flush():
-        nonlocal replaced
+        nonlocal decided, replaced
         write_json(paths.jev_answers, cache)
         if pending:
-            replaced = _merge_into_checkpoint(paths, fingerprint, pending, by_id) or replaced
+            written, was_replaced = _merge_into_checkpoint(paths, fingerprint, pending, by_id)
+            decided += len(written)
+            replaced = replaced or was_replaced
             pending.clear()
 
     try:
@@ -178,7 +190,6 @@ def screen(paths: Paths, project: Project, client=None, use_cache: bool = True) 
                         'tier': outcome.tier, 'score': outcome.score, 'reason': f'Jev rule: {outcome.rule}.',
                         'tool': TOOL, 'model': client.model, 'timestamp': now_iso(), 'prompt': fingerprint,
                         'input': paper_fingerprint(paper), 'jev': {'answers': probs, 'rule': outcome.rule}}
-                    decided += 1
                 if missing and asked % FLUSH_EVERY == 0:
                     flush()
         except Exception as exc:
@@ -198,33 +209,42 @@ def screen(paths: Paths, project: Project, client=None, use_cache: bool = True) 
     finally:
         if replaced:
             state.invalidate_validation(paths, remove_sample=True)
-        if owned:
-            client.close()
 
     if not escalated:
         state.mark_done(paths, 'classify', classified=len(cands))
     return {'decided': decided, 'escalated': escalated, 'asked': asked, 'model': client.model}
 
 
-def unsure_questions(paths: Paths, project: Project) -> dict[str, list[str]]:
-    """{paper id: [why Jev left it open]} for undecided papers: the question texts Jev was unsure about,
-    or NO_ABSTRACT_TEXT when it was not asked."""
+def _undecided(paths: Paths, project: Project):
+    """(paper id, why it is open) for each candidate without a current decision: a list of unsure question
+    texts, NO_ABSTRACT_TEXT, or None when Jev has not screened it as the project now stands (answers missing
+    for this model, question or paper text, or cached answers that would now give it a tier)."""
     questions, model = project.screening['questions'], project.screening['model']
     fingerprint = prompt_fingerprint(project)
     ckpt = state.load_checkpoint(paths)
     cache = read_json(paths.jev_answers, {}) or {}
-    out = {}
     for paper in state.load_candidates(paths):
         pid = paper['id']
         if state.is_current_decision(ckpt.get(pid), fingerprint, paper):
             continue
         if 'abstract' not in paper_state(paper):
-            out[pid] = [NO_ABSTRACT_TEXT]
+            yield pid, [NO_ABSTRACT_TEXT]
             continue
         known = _cached(cache.get(pid), paper, model)
         if not all(text in known for text in questions.values()):
+            yield pid, None
             continue
         outcome = evaluate(project.tier_rules, {q: known[t] for q, t in questions.items()}, project.thresholds)
-        if outcome.tier is None:
-            out[pid] = [questions[q] for q in outcome.unsure]
-    return out
+        yield pid, ([questions[q] for q in outcome.unsure] if outcome.tier is None else None)
+
+
+def unsure_questions(paths: Paths, project: Project) -> dict[str, list[str]]:
+    """{paper id: [why Jev left it open]} for undecided papers: the question texts Jev was unsure about,
+    or NO_ABSTRACT_TEXT when it was not asked."""
+    return {pid: why for pid, why in _undecided(paths, project) if why is not None}
+
+
+def not_yet_screened(paths: Paths, project: Project) -> list[str]:
+    """Undecided papers that `classify --jev` would still ask about or decide. Papers with no abstract are
+    left out: Jev escalates them unasked."""
+    return [pid for pid, why in _undecided(paths, project) if why is None]

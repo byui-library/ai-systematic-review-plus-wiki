@@ -42,6 +42,10 @@ def next_batch(paths: Paths, project: Project, size: int | None = None) -> dict:
         'remaining_after_this_batch': len(todo) - len(papers),
         'papers': papers,
     }
+    if project.screening['method'] == 'jev':
+        from .jev import unsure_questions   # here, not at the top: jev imports modules that import this one
+        unsure = unsure_questions(paths, project)
+        batch['jev_unsure'] = {p['id']: unsure[p['id']] for p in papers if p['id'] in unsure}
     write_json(paths.classify_batch, batch)
     return batch
 

@@ -38,11 +38,19 @@ def collect(paths: Paths, project: Project) -> dict:
             raise PipelineError(f"Paper {c['id']} is in tier {entry['tier']}, which project.yaml no longer "
                                 'defines. Restore that tier or re-classify the paper.') from None
         rows.append({**c, 'tier': tier.id, 'tier_label': tier.label, 'included': tier.included,
-                     'score': entry['score'], 'reason': entry['reason']})   # sources stay a list; writers join it
+                     'score': entry['score'], 'reason': entry['reason'],    # sources stay a list; writers join it
+                     'jev': entry.get('jev', {}).get('answers', {})})
     rows.sort(key=lambda r: (r['tier'], -r['score'], r.get('title', '')))
     return {'included': [r for r in rows if r['included']],
             'excluded': [r for r in rows if not r['included']],
             'unclassified': unclassified}
+
+
+def _columns(project: Project) -> list[tuple[str, str, int]]:
+    """Workbook columns: COLUMNS, plus one per Jev question when Jev screens (blank for assistant decisions)."""
+    if project.screening['method'] != 'jev':
+        return COLUMNS
+    return COLUMNS + [(f'jev:{q}', f'Jev: {q}', 10) for q in project.screening['questions']]
 
 
 def write_csv(path, rows: list[dict]) -> None:
@@ -88,16 +96,20 @@ def build_excel(paths: Paths, project: Project, stats: dict, data: dict, validat
     summary = wb.active
     summary.title = 'Summary'
     write_pairs(summary, _summary_rows(project, stats, data, validation))
+    columns = _columns(project)
+
+    def flat(r: dict) -> dict:
+        return {**r, **{f'jev:{q}': round(p, 2) for q, p in r.get('jev', {}).items()}}
 
     for t in project.tiers:
         if t.included:
-            write_table(wb.create_sheet(sheet_name(f'T{t.id} {t.label}')), COLUMNS,
-                        [r for r in data['included'] if r['tier'] == t.id])
+            write_table(wb.create_sheet(sheet_name(f'T{t.id} {t.label}')), columns,
+                        [flat(r) for r in data['included'] if r['tier'] == t.id])
 
     excluded_ids = [t.id for t in project.tiers if not t.included]
     promote = min(excluded_ids) if excluded_ids else None
-    write_table(wb.create_sheet('Excluded'), [('promote', 'Consider promoting?', 12)] + COLUMNS,
-                [{**r, 'promote': 'yes' if r['tier'] == promote else ''} for r in data['excluded']])
+    write_table(wb.create_sheet('Excluded'), [('promote', 'Consider promoting?', 12)] + columns,
+                [{**flat(r), 'promote': 'yes' if r['tier'] == promote else ''} for r in data['excluded']])
 
     if validation:
         titles = {r['id']: r.get('title', '') for r in data['included'] + data['excluded']}

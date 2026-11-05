@@ -51,8 +51,8 @@ if __name__ == '__main__':
     _use_project_venv()
 
 try:
-    from review import (classify, demo, figures, graph, pdfs, publish, report, site, stages, state,  # noqa: E402
-                        tables, validate, wiki)
+    from review import (classify, demo, figures, graph, jev, pdfs, publish, report, site, stages,  # noqa: E402
+                        state, tables, validate, wiki)
     from review.config import Paths, load_project, summary  # noqa: E402
     from review.errors import PipelineError  # noqa: E402
 except ImportError as exc:
@@ -89,6 +89,16 @@ def cmd_prescreen(args, paths: Paths) -> None:
 
 def cmd_classify(args, paths: Paths) -> None:
     project = load_project(paths.root)
+    if args.jev:
+        out = jev.screen(paths, project)
+        print(f"{out['decided']} papers decided by Jev ({out['model']}); {out['asked']} sent to Jev this run.")
+        print(f"{len(out['escalated'])} need the AI assistant, because an unsure answer decides their tier "
+              "(or there is no abstract).")
+        if out['escalated']:
+            print(f"Next step: {state.next_step(paths, 'classify')}")
+        else:
+            print(f"Classification complete. Next step: {state.next_step(paths, 'validate')}")
+        return
     if args.save:
         out = classify.save_results(paths, project, args.save, args.tool, args.model)
         tiers = ', '.join(f'tier {t}: {n}' for t, n in out['by_tier'].items())
@@ -98,6 +108,11 @@ def cmd_classify(args, paths: Paths) -> None:
             print(f"Classification complete. Next step: {state.next_step(paths, 'validate')}")
         return
     if args.next_batch is not None:
+        if project.screening['method'] == 'jev':
+            unscreened = jev.not_yet_screened(paths, project)
+            if unscreened:
+                raise PipelineError(f'Run py run.py classify --jev first: {len(unscreened)} papers have not been '
+                                    'screened by Jev yet.')
         batch = classify.next_batch(paths, project, args.next_batch or None)
         if not batch['papers']:
             print(f"All candidates are classified. Next step: {state.next_step(paths, 'validate')}")
@@ -356,6 +371,7 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument('--next-batch', nargs='?', type=int, const=0, metavar='N',
                    help='write the next N unclassified papers to data/classify_batch.json')
     g.add_argument('--save', metavar='FILE', help='validate and save AI decisions from FILE')
+    g.add_argument('--jev', action='store_true', help='screen with TypeSafe Jev (screening.method: jev)')
     c.add_argument('--tool', help='AI tool name for the audit log, e.g. "Claude Code" or "Codex"')
     c.add_argument('--model', help='exact model id for the audit log')
     v = sub.add_parser('validate', help='draw or score the human validation sample')
