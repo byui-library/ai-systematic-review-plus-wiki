@@ -2,6 +2,7 @@ import pytest
 import yaml
 
 from review.config import ConfigError, load_project
+from review.prompt import _digest, build_prompt, prompt_fingerprint
 
 QUESTIONS = {'structure': 'Does the paper analyse how load metrics relate to each other?',
              'team_sport': 'Were the participants playing a team sport?'}
@@ -97,11 +98,7 @@ def test_tier_rules_are_highest_tier_first_whatever_the_file_order(workspace):
     assert [i for i, _ in project.tier_rules] == [1, 2, 3, 4]
 
 
-from review.prompt import prompt_fingerprint
-
-
 def test_assistant_fingerprint_is_unchanged_by_the_new_defaults(workspace):
-    from review.prompt import _digest, build_prompt
     project = load_project(workspace.root)
     assert prompt_fingerprint(project) == _digest(build_prompt(project))
 
@@ -112,3 +109,16 @@ def test_changing_a_question_or_rule_changes_the_fingerprint(workspace):
     c = prompt_fingerprint(use_jev(workspace, rules={**RULES, 3: [['structure']]}))
     d = prompt_fingerprint(use_jev(workspace, thresholds={'yes_at_least': 0.8, 'no_at_most': 0.2}))
     assert len({a, b, c, d}) == 4
+
+
+def test_switching_from_assistant_to_jev_changes_the_fingerprint(workspace):
+    before = prompt_fingerprint(load_project(workspace.root))
+    assert prompt_fingerprint(use_jev(workspace)) != before
+
+
+def test_fingerprint_ignores_question_order_and_threshold_spelling(workspace):
+    base = prompt_fingerprint(use_jev(workspace, thresholds={'yes_at_least': 0.7, 'no_at_most': 0.3}))
+    reversed_questions = dict(reversed(list(QUESTIONS.items())))
+    assert list(reversed_questions) != list(QUESTIONS)
+    assert prompt_fingerprint(use_jev(workspace, reversed_questions)) == base
+    assert prompt_fingerprint(use_jev(workspace, thresholds={'yes_at_least': 0.70, 'no_at_most': 0.30})) == base
