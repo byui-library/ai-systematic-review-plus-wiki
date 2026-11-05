@@ -87,13 +87,20 @@ def cmd_prescreen(args, paths: Paths) -> None:
     print(f"Next step: {state.next_step(paths, 'classify')}")
 
 
+def _papers(n: int) -> str:
+    return f"{n} paper{'' if n == 1 else 's'}"
+
+
 def cmd_classify(args, paths: Paths) -> None:
     project = load_project(paths.root)
     if args.jev:
         out = jev.screen(paths, project)
-        print(f"{out['decided']} papers decided by Jev ({out['model']}); {out['asked']} sent to Jev this run.")
-        print(f"{len(out['escalated'])} need the AI assistant, because an unsure answer decides their tier "
-              "(or there is no abstract).")
+        prog = classify.progress(paths, project)
+        n = len(out['escalated'])
+        print(f"{_papers(out['decided'])} decided by Jev ({out['model']}); {out['asked']} sent to Jev this run "
+              f"({prog['classified']} of {prog['total']} candidates now have a tier).")
+        print(f"{_papers(n)} {'needs' if n == 1 else 'need'} the AI assistant: Jev was unsure about a question "
+              'that decides their tier, or the paper has no abstract.')
         if out['escalated']:
             print(f"Next step: {state.next_step(paths, 'classify')}")
         else:
@@ -109,10 +116,13 @@ def cmd_classify(args, paths: Paths) -> None:
         return
     if args.next_batch is not None:
         if project.screening['method'] == 'jev':
-            unscreened = jev.not_yet_screened(paths, project)
-            if unscreened:
-                raise PipelineError(f'Run py run.py classify --jev first: {len(unscreened)} papers have not been '
-                                    'screened by Jev yet.')
+            n = len(jev.not_yet_screened(paths, project))
+            if n:   # never hand the assistant papers Jev has not looked at
+                raise PipelineError(
+                    f"Run py run.py classify --jev first: {_papers(n)} {'needs' if n == 1 else 'need'} Jev's "
+                    'answers, or a fresh look at answers already saved (this costs nothing new if only '
+                    'thresholds or rules changed). Jev needs TYPESAFE_API_KEY in your .env file. To screen with '
+                    'the AI assistant only, set screening.method: assistant in project.yaml.')
         batch = classify.next_batch(paths, project, args.next_batch or None)
         if not batch['papers']:
             print(f"All candidates are classified. Next step: {state.next_step(paths, 'validate')}")
@@ -365,7 +375,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser('check-config', help='validate project.yaml and summarise it').set_defaults(func=cmd_check_config)
     sub.add_parser('import', help='read every export in data/exports/ and remove duplicates').set_defaults(func=cmd_import)
     sub.add_parser('prescreen', help='apply filters and keyword scoring').set_defaults(func=cmd_prescreen)
-    c = sub.add_parser('classify', help='hand out a batch to the AI, or save its decisions')
+    c = sub.add_parser('classify', help='hand out a batch to the AI, save its decisions, or screen with Jev '
+                                         '(--jev)')
     c.set_defaults(func=cmd_classify)
     g = c.add_mutually_exclusive_group()
     g.add_argument('--next-batch', nargs='?', type=int, const=0, metavar='N',

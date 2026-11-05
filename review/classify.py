@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from . import state
+from . import jev, state
 from .config import Paths, Project, whole_number
 from .errors import PipelineError
 from .io import now_iso, read_json, write_json
@@ -43,8 +43,7 @@ def next_batch(paths: Paths, project: Project, size: int | None = None) -> dict:
         'papers': papers,
     }
     if project.screening['method'] == 'jev':
-        from .jev import unsure_questions   # here, not at the top: jev imports modules that import this one
-        unsure = unsure_questions(paths, project)
+        unsure = jev.unsure_questions(paths, project)
         batch['jev_unsure'] = {p['id']: unsure[p['id']] for p in papers if p['id'] in unsure}
     write_json(paths.classify_batch, batch)
     return batch

@@ -229,10 +229,9 @@ def test_fresh_run_and_new_model_ask_again(prescreened):
     write_json(paths.checkpoint, {})
     jev.screen(paths, project, client=fake, use_cache=False)
     assert len(fake.calls) == 2 * n
-    write_json(paths.checkpoint, {})
     newer = FakeJev({})
     newer.model = 'jev-1.15.0'
-    jev.screen(paths, project, client=newer)
+    jev.screen(paths, use_jev(paths, model='jev-1.15.0'), client=newer)   # the configured model is asked
     assert len(newer.calls) == n
 
 
@@ -521,7 +520,8 @@ def test_next_batch_before_jev_screening_is_refused(prescreened, capsys):
     assert main(['--root', str(paths.root), 'classify', '--next-batch']) == 1
     err = capsys.readouterr().err
     assert 'Run py run.py' in err and 'classify --jev first' in err   # main() adds --root to the hint
-    assert f'{len(candidates(paths))} papers have not been screened by Jev yet' in err
+    assert f"{len(candidates(paths))} papers need Jev's answers" in err and 'TYPESAFE_API_KEY' in err
+    assert 'screening.method: assistant' in err
 
 
 def test_not_yet_screened_includes_papers_jev_would_now_decide(prescreened):
@@ -543,22 +543,32 @@ def test_classify_jev_command(prescreened, monkeypatch, capsys):
     monkeypatch.setattr(jev, '_client', lambda paths, model: FakeJev({}))
     assert main(['--root', str(paths.root), 'classify', '--jev']) == 0
     out = capsys.readouterr().out
-    assert 'decided by Jev (jev-1.14.0)' in out and '0 need the AI assistant' in out
-    assert 'Classification complete' in out
+    n = len(candidates(paths))
+    assert 'decided by Jev (jev-1.14.0)' in out and '0 papers need the AI assistant' in out
+    assert f'({n} of {n} candidates now have a tier)' in out and 'Classification complete' in out
 
 
 def test_workbook_has_jev_columns(prescreened):
+    import csv
     from openpyxl import load_workbook
     from review import report
     paths, _ = prescreened
     project = use_jev(paths)
-    jev.screen(paths, project, client=FakeJev({}, default=0.1234))
+    jev.screen(paths, project, client=FakeJev({}, default=0.2999))   # just under no_at_most: 0.3
     report.run_report(paths, project)
-    rows = list(load_workbook(paths.results_xlsx)['Excluded'].iter_rows(values_only=True))
-    header = list(rows[0])
+    wb = load_workbook(paths.results_xlsx)
+    ws = wb['Excluded']
+    header = [c.value for c in ws[1]]
     assert header[0] == 'Consider promoting?'
     assert 'Jev: team_sport' in header and 'Jev: structure' in header
-    assert rows[1][header.index('Jev: team_sport')] == 0.12
+    cell = ws.cell(row=2, column=header.index('Jev: team_sport') + 1)
+    assert cell.value == pytest.approx(0.2999) and cell.number_format == '0.00'
+    summary = {r[0]: r[1] for r in wb['Summary'].iter_rows(values_only=True)}
+    assert 'Jev questions' in summary and summary['team_sport'] == QUESTIONS['team_sport']
+    assert summary['Jev model'] == 'jev-1.14.0' and '0.7' in summary['Jev thresholds']
+    with open(paths.excluded_csv, encoding='utf-8-sig') as f:
+        row = next(csv.DictReader(f))
+    assert float(row['jev:structure']) == pytest.approx(0.2999)
 
 
 def test_assistant_workbook_has_no_jev_columns(classified):
@@ -588,8 +598,9 @@ def test_client_is_closed_even_when_candidates_are_missing(prescreened, monkeypa
     assert closed == [True]
 
 
-def test_decided_excludes_a_decision_the_merge_dropped(prescreened):
+def test_decided_excludes_a_decision_the_merge_dropped(prescreened, monkeypatch):
     paths, _ = prescreened
+    monkeypatch.setattr(jev, 'FLUSH_EVERY', 1000)   # cands[0] waits unsaved while cands[1] is asked
     project = use_jev(paths)
     cands = candidates(paths)
     first = cands[0]
@@ -605,3 +616,117 @@ def test_decided_excludes_a_decision_the_merge_dropped(prescreened):
     out = jev.screen(paths, project, client=SomeoneSaves({}))
     assert state.load_checkpoint(paths)[first['id']] == theirs
     assert out['decided'] == len(cands) - 1
+
+
+def test_jev_then_assistant_end_to_end(prescreened, monkeypatch, capsys, tmp_path):
+    from run import main
+    paths, _ = prescreened
+    project = use_jev(paths)
+    ids = [c['id'] for c in candidates(paths)]
+    table = by_title(paths, {ids[1]: {'team_sport': 0.95, 'structure': 0.5}})
+    monkeypatch.setattr(jev, '_client', lambda paths, model: FakeJev(table))
+    root = ['--root', str(paths.root)]
+    assert main([*root, 'classify', '--jev']) == 0
+    assert main([*root, 'classify', '--next-batch']) == 0
+    batch = read_json(paths.classify_batch)
+    assert [p['id'] for p in batch['papers']] == [ids[1]]
+    assert batch['jev_unsure'] == {ids[1]: [QUESTIONS['structure']]}
+    results = tmp_path / 'results.json'
+    write_json(results, {'results': [{'id': ids[1], 'tier': 2, 'score': 60,
+                                      'reason': 'Team sport; metric structure not analysed.'}]})
+    capsys.readouterr()
+    assert main([*root, 'classify', '--save', str(results), '--tool', 'Claude Code',
+                 '--model', 'claude-opus-5-5']) == 0
+    assert 'Classification complete' in capsys.readouterr().out
+    assert classify_remaining(paths, project) == 0
+
+
+def test_classify_jev_command_with_escalated_papers(prescreened, monkeypatch, capsys):
+    from run import main
+    paths, _ = prescreened
+    use_jev(paths)
+    ids = [c['id'] for c in candidates(paths)]
+    table = by_title(paths, {ids[1]: {'team_sport': 0.95, 'structure': 0.5}})
+    monkeypatch.setattr(jev, '_client', lambda paths, model: FakeJev(table))
+    assert main(['--root', str(paths.root), 'classify', '--jev']) == 0
+    out = capsys.readouterr().out
+    n = len(ids)
+    assert '1 paper needs the AI assistant: Jev was unsure' in out
+    assert f'({n - 1} of {n} candidates now have a tier)' in out
+    assert 'Next step: Ask your AI assistant' in out and 'Classification complete' not in out
+
+
+def test_workbook_shows_cached_jev_answers_for_a_paper_the_assistant_decided(prescreened, tmp_path):
+    from openpyxl import load_workbook
+    from review import classify, report
+    paths, _ = prescreened
+    project = use_jev(paths)
+    ids = [c['id'] for c in candidates(paths)]
+    jev.screen(paths, project, client=FakeJev(by_title(paths, {ids[1]: {'team_sport': 0.95, 'structure': 0.5}})))
+    classify.next_batch(paths, project)
+    results = tmp_path / 'results.json'
+    write_json(results, {'results': [{'id': ids[1], 'tier': 2, 'score': 60, 'reason': 'Assistant.'}]})
+    classify.save_results(paths, project, results, 'Claude Code', 'claude-opus-5-5')
+    assert 'jev' not in state.load_checkpoint(paths)[ids[1]]
+    report.run_report(paths, project)
+    ws = load_workbook(paths.results_xlsx)['T2 Strong Match']
+    header = [c.value for c in ws[1]]
+    row = next(r for r in ws.iter_rows(min_row=2, values_only=True) if r[0] == ids[1])
+    assert row[header.index('Jev: team_sport')] == pytest.approx(0.95)
+    assert row[header.index('Jev: structure')] == pytest.approx(0.5)
+
+
+def test_jev_unsure_carries_the_no_abstract_text(prescreened):
+    from review import classify
+    paths, _ = prescreened
+    project = use_jev(paths)
+    ids = [c['id'] for c in candidates(paths)]
+    edit_candidates(paths, lambda c: c.update(abstract='') if c['id'] == ids[0] else None)
+    jev.screen(paths, project, client=FakeJev({}))
+    batch = classify.next_batch(paths, project)
+    assert batch['jev_unsure'] == {ids[0]: ['No abstract: Jev was not asked']}
+
+
+def test_gate_after_a_threshold_change(prescreened, capsys):
+    from run import main
+    paths, _ = prescreened
+    project = use_jev(paths)
+    ids = [c['id'] for c in candidates(paths)]
+    jev.screen(paths, project, client=FakeJev(by_title(paths, {ids[1]: {'team_sport': 0.95, 'structure': 0.5}})))
+    use_jev(paths, thresholds={'yes_at_least': 0.4, 'no_at_most': 0.3})   # old decisions retire
+    assert main(['--root', str(paths.root), 'classify', '--next-batch']) == 1
+    err = capsys.readouterr().err
+    assert f"{len(ids)} papers need Jev's answers, or a fresh look at answers already saved" in err
+
+
+def test_a_failing_close_does_not_hide_the_real_error(prescreened, monkeypatch):
+    paths, _ = prescreened
+    project = use_jev(paths)
+
+    class BadClose(FakeJev):
+        def close(self):
+            raise RuntimeError('close failed')
+    monkeypatch.setattr(jev, '_client', lambda paths, model: BadClose({}))
+    paths.candidates.unlink()
+    with pytest.raises(PipelineError, match='No candidates yet'):
+        jev.screen(paths, project)
+
+
+def test_workbook_ignores_malformed_jev_values(prescreened):
+    from openpyxl import load_workbook
+    from review import report
+    paths, _ = prescreened
+    project = use_jev(paths)
+    jev.screen(paths, project, client=FakeJev({}))
+    ckpt = state.load_checkpoint(paths)
+    pids = list(ckpt)
+    ckpt[pids[0]]['jev'] = 'garbled'
+    ckpt[pids[1]]['jev'] = {'answers': {'team_sport': 'high', 'structure': 0.2}}
+    write_json(paths.checkpoint, ckpt)
+    report.run_report(paths, project)
+    ws = load_workbook(paths.results_xlsx)['Excluded']
+    header = [c.value for c in ws[1]]
+    rows = {r[1]: r for r in ws.iter_rows(min_row=2, values_only=True)}
+    assert rows[pids[0]][header.index('Jev: team_sport')] == pytest.approx(0.05)   # from the cache
+    assert rows[pids[1]][header.index('Jev: team_sport')] is None
+    assert rows[pids[1]][header.index('Jev: structure')] == pytest.approx(0.2)

@@ -8,7 +8,7 @@ from datetime import date
 
 from openpyxl import Workbook
 
-from . import state
+from . import jev, state
 from .config import Paths, Project
 from .errors import PipelineError
 from .excel import csv_safe, save_workbook, sheet_name, write_pairs, write_table
@@ -23,9 +23,21 @@ COLUMNS = [
 ]
 
 
+def _jev_answers(project: Project, entry: dict, cache: dict, paper: dict) -> dict[str, float]:
+    """{question id: probability}: the answers a Jev decision was made from, or, for a paper the assistant
+    decided after Jev escalated it, Jev's saved answers for the configured model and the paper's current text."""
+    saved = entry.get('jev')
+    answers = saved.get('answers') if isinstance(saved, dict) else None
+    if not isinstance(answers, dict):
+        return jev.cached_answers(project, cache, paper)
+    return {q: float(p) for q, p in answers.items()
+            if q in project.screening['questions'] and jev.is_probability(p)}
+
+
 def collect(paths: Paths, project: Project) -> dict:
     ckpt = state.load_checkpoint(paths)
     fingerprint = prompt_fingerprint(project)
+    cache = jev.load_cache(paths) if project.screening['method'] == 'jev' else None
     rows, unclassified = [], 0
     for c in state.load_candidates(paths):
         entry = ckpt.get(c['id'])
@@ -37,9 +49,10 @@ def collect(paths: Paths, project: Project) -> dict:
         except KeyError:
             raise PipelineError(f"Paper {c['id']} is in tier {entry['tier']}, which project.yaml no longer "
                                 'defines. Restore that tier or re-classify the paper.') from None
+        answers = _jev_answers(project, entry, cache, c) if cache is not None else {}
         rows.append({**c, 'tier': tier.id, 'tier_label': tier.label, 'included': tier.included,
                      'score': entry['score'], 'reason': entry['reason'],    # sources stay a list; writers join it
-                     'jev': entry.get('jev', {}).get('answers', {})})
+                     'jev': answers, **{f'jev:{q}': p for q, p in answers.items()}})
     rows.sort(key=lambda r: (r['tier'], -r['score'], r.get('title', '')))
     return {'included': [r for r in rows if r['included']],
             'excluded': [r for r in rows if not r['included']],
@@ -47,14 +60,16 @@ def collect(paths: Paths, project: Project) -> dict:
 
 
 def _columns(project: Project) -> list[tuple[str, str, int]]:
-    """Workbook columns: COLUMNS, plus one per Jev question when Jev screens (blank for assistant decisions)."""
+    """Workbook and CSV columns: COLUMNS, plus one per Jev question when Jev screens (blank when Jev has no
+    saved answer for the paper)."""
     if project.screening['method'] != 'jev':
         return COLUMNS
-    return COLUMNS + [(f'jev:{q}', f'Jev: {q}', 10) for q in project.screening['questions']]
+    return COLUMNS + [(f'jev:{q}', title, max(10, len(title) + 2))
+                      for q in project.screening['questions'] for title in [f'Jev: {q}']]
 
 
-def write_csv(path, rows: list[dict]) -> None:
-    fields = [key for key, _, _ in COLUMNS]
+def write_csv(path, rows: list[dict], columns: list[tuple[str, str, int]] = COLUMNS) -> None:
+    fields = [key for key, _, _ in columns]
     with open(path, 'w', encoding='utf-8-sig', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore')
         writer.writeheader()
@@ -86,6 +101,12 @@ def _summary_rows(project: Project, stats: dict, data: dict, validation: dict | 
     rows.append(('Included in review', len(data['included'])))
     if data['unclassified']:
         rows.append(('Not yet classified', data['unclassified']))
+    if project.screening['method'] == 'jev':
+        t = project.thresholds
+        rows += [('', ''), ('Jev questions', '')]
+        rows += [(q, text) for q, text in project.screening['questions'].items()]
+        rows += [('Jev model', project.screening['model']),
+                 ('Jev thresholds', f"yes at least {t['yes']}, no at most {t['no']}")]
     if validation:
         rows += [('', '')] + validation_rows(validation)
     return rows
@@ -98,18 +119,22 @@ def build_excel(paths: Paths, project: Project, stats: dict, data: dict, validat
     write_pairs(summary, _summary_rows(project, stats, data, validation))
     columns = _columns(project)
 
-    def flat(r: dict) -> dict:
-        return {**r, **{f'jev:{q}': round(p, 2) for q, p in r.get('jev', {}).items()}}
+    def table(title: str, cols: list, rows: list[dict]) -> None:
+        ws = wb.create_sheet(title)
+        write_table(ws, cols, rows)
+        for col, (key, _, _) in enumerate(cols, 1):
+            if key.startswith('jev:'):   # the full probability is stored; two decimals are shown
+                for row in range(2, len(rows) + 2):
+                    ws.cell(row=row, column=col).number_format = '0.00'
 
     for t in project.tiers:
         if t.included:
-            write_table(wb.create_sheet(sheet_name(f'T{t.id} {t.label}')), columns,
-                        [flat(r) for r in data['included'] if r['tier'] == t.id])
+            table(sheet_name(f'T{t.id} {t.label}'), columns, [r for r in data['included'] if r['tier'] == t.id])
 
     excluded_ids = [t.id for t in project.tiers if not t.included]
     promote = min(excluded_ids) if excluded_ids else None
-    write_table(wb.create_sheet('Excluded'), [('promote', 'Consider promoting?', 12)] + columns,
-                [{**flat(r), 'promote': 'yes' if r['tier'] == promote else ''} for r in data['excluded']])
+    table('Excluded', [('promote', 'Consider promoting?', 12)] + columns,
+          [{**r, 'promote': 'yes' if r['tier'] == promote else ''} for r in data['excluded']])
 
     if validation:
         titles = {r['id']: r.get('title', '') for r in data['included'] + data['excluded']}
@@ -231,8 +256,8 @@ def run_report(paths: Paths, project: Project) -> dict:
     validation = read_json(paths.validation_results) if state.is_done(paths, 'validate') else None
     if validation and validation.get('prompt') != prompt_fingerprint(project):
         validation = None   # scored against decisions made under different criteria
-    write_csv(paths.included_csv, data['included'])
-    write_csv(paths.excluded_csv, data['excluded'])
+    write_csv(paths.included_csv, data['included'], _columns(project))
+    write_csv(paths.excluded_csv, data['excluded'], _columns(project))
     build_excel(paths, project, stats, data, validation)
     files = [paths.results_xlsx, paths.included_csv, paths.excluded_csv]
     if project.outputs.get('prisma') and data['unclassified'] == 0:

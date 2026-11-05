@@ -30,6 +30,17 @@
 
 6. Tell the researcher your progress in one line (classified, remaining, and count per tier). Then go back to step 1 until no papers remain, unless the researcher asked for only one batch.
 
+## With Jev screening
+
+If `project.yaml` has `screening.method: jev`, TypeSafe Jev screens first and you classify only what it couldn't settle.
+
+1. Run `py run.py classify --jev` before the loop above. It asks Jev about every paper and saves the tiers Jev is confident about.
+2. Then follow the loop as usual. Each batch holds only the papers Jev couldn't settle.
+3. If the batch has a `jev_unsure` field, it lists, for each paper id, the questions Jev was unsure about. Judge those points yourself from the paper, and mention them in your `reason`.
+4. `No abstract: Jev was not asked` means the paper has no abstract. Decide from the title and keywords, and say so in your `reason`.
+
+Every tier rule is still in the batch's `prompt`. Follow it exactly, as for any other batch.
+
 ## Rules
 
 - Never edit `data/checkpoint.json` or any other `data/*.json` file directly. Always save through `run.py`.
