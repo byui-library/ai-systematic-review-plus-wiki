@@ -64,7 +64,7 @@ DEFAULTS: dict = {
     'pdfs': {'libkey': True, 'unpaywall': True},
     'site': {'title': '', 'targets': ['local']},
     'classify': {'batch_size': 50},
-    'screening': {'method': 'assistant', 'thresholds': {'yes': 0.7, 'no': 0.3}, 'questions': {}},
+    'screening': {'method': 'assistant', 'thresholds': {'yes_at_least': 0.7, 'no_at_most': 0.3}, 'questions': {}},
     'wiki': {'deep_tiers': None},   # None: the first included tier gets the deep, researcher-confirmed pages
 }
 
@@ -209,6 +209,11 @@ class Project:
     @property
     def screening(self) -> dict:
         return self.raw['screening']
+
+    @property
+    def thresholds(self) -> dict:
+        t = self.raw['screening']['thresholds']
+        return {'yes': t['yes_at_least'], 'no': t['no_at_most']}
 
     @property
     def tier_rules(self) -> list[tuple[int, list[list[str]] | None]]:
@@ -417,43 +422,83 @@ def _normalise_criteria(c: dict, legacy_rows: list[tuple[str, str]] | None = Non
 
 
 QUESTION_ID = re.compile(r'^[a-z][a-z0-9_]*$')
+RESERVED_WORDS = "'yes', 'no', 'on', 'off', 'true' and 'false' can't be question ids in YAML; choose another, such as is_on"
+
+
+def _word(value) -> str:
+    """How a YAML value reads back to the researcher (True shows as yes, False as no)."""
+    return ('yes' if value else 'no') if isinstance(value, bool) else str(value)
+
+
+def _number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _threshold_problems(t) -> list[str]:
+    if not isinstance(t, dict):
+        return ['screening.thresholds should be a section, for example: yes_at_least: 0.7 and no_at_most: 0.3']
+    extra = [_word(k) for k in t if k not in ('yes_at_least', 'no_at_most')]
+    if extra:
+        return [f"screening.thresholds accepts only yes_at_least and no_at_most (found: {', '.join(extra)}). "
+                'Write them as yes_at_least: 0.7 and no_at_most: 0.3.']
+    lo, hi = t.get('no_at_most'), t.get('yes_at_least')
+    if not (_number(lo) and _number(hi) and 0 < lo < hi < 1):
+        return ['screening.thresholds: no_at_most must be below yes_at_least, and both between 0 and 1 '
+                '(for example yes_at_least: 0.7, no_at_most: 0.3)']
+    return []
 
 
 def _screening_problems(raw: dict) -> list[str]:
     s, p = raw['screening'], []
-    if s.get('method') not in ('assistant', 'jev'):
-        return ['screening.method must be assistant or jev']
-    if s['method'] == 'assistant':
-        return []
-    questions = s.get('questions')
-    if not isinstance(questions, dict) or not questions:
-        return ['screening.questions must list at least one question, for example: team_sport: Is it a team sport?']
-    if any(not isinstance(k, str) or not QUESTION_ID.match(k) for k in questions):
-        p.append('screening question ids must be lowercase words joined by _, for example: team_sport')
-    if any(not str(v or '').strip() for v in questions.values()):
-        p.append('every screening question needs its text')
-    t = s.get('thresholds') or {}
-    ok = all(isinstance(t.get(k), (int, float)) and not isinstance(t.get(k), bool) for k in ('yes', 'no'))
-    if not ok or not 0 < t['no'] < t['yes'] < 1:
-        p.append('screening.thresholds need 0 < no < yes < 1, for example: {yes: 0.7, no: 0.3}')
+    method = s.get('method')
+    if method not in ('assistant', 'jev'):
+        p.append(f'screening.method must be assistant or jev (found: {_word(method)})')
     tiers = sorted((t for t in raw.get('tiers') or [] if isinstance(t, dict) and whole_number(t.get('id')) is not None),
                    key=lambda t: whole_number(t['id']))
+    jev = method == 'jev'
+    questions = s.get('questions')
+    if jev:
+        if not isinstance(questions, dict) or not questions:
+            p.append('screening.questions must list at least one question, for example: team_sport: Is it a team sport?')
+            questions = {}
+        for k, v in questions.items():
+            if isinstance(k, bool):
+                p.append(RESERVED_WORDS)
+            elif not isinstance(k, str) or not QUESTION_ID.match(k) or k == 'not':
+                p.append(f"screening question ids must be lowercase words joined by _, for example: team_sport "
+                         f"('not' is reserved); fix '{_word(k)}'")
+            elif not isinstance(v, str) or not v.strip():
+                p.append(f"screening question '{k}' needs its text")
+    p += _threshold_problems(s.get('thresholds'))
+    used = set()
     for i, tier in enumerate(tiers):
         when, last = tier.get('when'), i == len(tiers) - 1
-        if last and when is not None:
+        if jev and last and when is not None:
             p.append(f"the last tier ({tier['id']}) catches everything else, so it must not have when:")
-        if not last and when is None:
+        if jev and not last and when is None:
             p.append(f"tier {tier['id']} needs when: (only the last tier catches everything else)")
         if when is None:
             continue
         if not isinstance(when, list) or not when or any(not isinstance(a, list) or not a for a in when):
             p.append(f"tier {tier['id']} when: must be a list of lists, for example: [[team_sport, wearable]]")
             continue
+        if not jev:
+            continue
         for cond in (c for a in when for c in a):
+            if isinstance(cond, bool):
+                p.append(RESERVED_WORDS)
+                continue
             cond = str(cond).strip()
+            if cond[:4].lower() == 'not ' and cond[:4] != 'not ':
+                p.append(f"tier {tier['id']}: write 'not {cond[4:].strip()}' in lowercase")
+                continue
             qid = cond[4:].strip() if cond.startswith('not ') else cond
+            used.add(qid)
             if qid not in questions:
                 p.append(f"tier {tier['id']} uses unknown question '{qid}'")
+    if jev:
+        p += [f"question '{q}' is not used by any tier's when: (remove it or use it in a rule)"
+              for q in questions if isinstance(q, str) and q not in used]
     return p
 
 
