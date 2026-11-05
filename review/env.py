@@ -6,7 +6,7 @@ import re
 
 from .config import Paths
 
-KNOWN_KEYS = ('LIBKEY_LIBRARY_ID', 'LIBKEY_API_TOKEN', 'UNPAYWALL_EMAIL')
+KNOWN_KEYS = ('LIBKEY_LIBRARY_ID', 'LIBKEY_API_TOKEN', 'UNPAYWALL_EMAIL', 'TYPESAFE_API_KEY')
 _LINE = re.compile(r'^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$')
 
 
