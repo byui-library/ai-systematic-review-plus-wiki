@@ -62,10 +62,11 @@ In November 2026 we tested an optional screening mode that used TypeSafe's Jev m
 | | Assistant alone | Jev + assistant |
 | --- | --- | --- |
 | Recall (included after full text) | 95.5% | 84.4% (−11.1 points, 95% interval −14.0 to −8.2) |
-| Papers passed to full-text reading | 7.7% | 5.6% |
+| Papers passed to full-text reading, re-weighted to the full datasets | 7.7% | 5.6% |
 
 **Why it lost:**
-- 72 of the 76 lost papers were ones Jev confidently excluded on core-topic questions, which it reads literally. The assistant never saw them.
+- Jev + assistant missed 76 included papers. The assistant alone missed 22, so the net loss is 54.
+- 72 of those 76 were ones Jev confidently excluded on core-topic questions, which it reads literally. The assistant never saw them.
 - A re-analysis after the verdict tried stricter thresholds and an "assistant OR Jev" safety net. Neither clearly beat the assistant alone: the best gained 0.6 points. Jev also confidently rejected nearly every paper the assistant missed.
 
 **Where the work is kept:**
