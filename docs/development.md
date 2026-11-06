@@ -50,6 +50,31 @@ py -3.13 -m venv .venv
 
 Commands: `status`, `check-config`, `import`, `prescreen`, `classify --next-batch [N] | --save FILE --tool T --model M`, `validate --draw [--force] | --score`, `report`, `pdfs [--match]`, `wiki --scaffold | --next-paper | --check | --tables | --index`, `figures`, `graph`, `site [--target] [--serve]`, `publish openequella --content-repo PATH | github_pages`, `demo`. Run `py run.py <command> -h` for options. Use `--root <folder>` to run against a project folder other than the repo root.
 
+### Considered, not adopted: Jev screening
+
+In November 2026 we tested an optional screening mode that used TypeSafe's Jev model.
+- Jev answered yes/no questions drafted from the criteria, and code turned the answers into a tier.
+- The assistant judged only the papers where an unsure answer decided the tier.
+- The ship bar, set before any results, was a clear gain in recall over the assistant alone.
+
+**Result: not adopted.** On four human-screened SYNERGY+ reviews (2,000 records, 487 finally included):
+
+| | Assistant alone | Jev + assistant |
+| --- | --- | --- |
+| Recall (included after full text) | 95.5% | 84.4% (−11.1 points, 95% interval −14.0 to −8.2) |
+| Papers passed to full-text reading, re-weighted to the full datasets | 7.7% | 5.6% |
+
+**Why it lost:**
+- Jev + assistant missed 76 included papers. The assistant alone missed 22, so the net loss is 54.
+- 72 of those 76 were ones Jev confidently excluded, mostly on core-topic questions, which it reads literally. The assistant never saw them.
+- A re-analysis after the verdict tried stricter thresholds and an "assistant OR Jev" safety net. Neither clearly beat the assistant alone: the best gained 0.6 points. Jev also confidently rejected nearly every paper the assistant missed.
+
+**Where the work is kept:**
+- The code is on the unmerged `jev-screening` branch.
+- The benchmark repository (`byui-library/jev-screening-benchmark`) is private.
+
+**Before trying again:** don't reopen this without fresh human-screened test sets and a reason to expect a recall gain.
+
 ### Module map (`review/`)
 
 | Module | Responsibility |
